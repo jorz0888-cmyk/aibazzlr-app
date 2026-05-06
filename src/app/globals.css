@@ -1,0 +1,61 @@
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  html,
+  body {
+    background-color: #0d0d14;
+    color: #f0eeff;
+    font-family: "Noto Sans JP", system-ui, -apple-system, sans-serif;
+    font-feature-settings: "palt";
+    -webkit-font-smoothing: antialiased;
+    letter-spacing: 0.01em;
+  }
+  *::selection {
+    background: rgba(0, 217, 255, 0.25);
+    color: #f0eeff;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-cyan px-5 py-3 text-sm font-bold text-bg shadow-cyan transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-line-strong bg-transparent px-5 py-3 text-sm font-semibold text-ink transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm text-ink-muted transition hover:bg-white/5 hover:text-ink;
+  }
+  .input {
+    @apply w-full rounded-lg border border-line-strong bg-bg-surface px-4 py-3 text-sm text-ink placeholder-ink-subtle outline-none transition focus:border-cyan focus:ring-2 focus:ring-cyan/40;
+  }
+  .label {
+    @apply mb-1.5 block text-xs font-semibold tracking-wide text-ink-muted;
+  }
+  .card {
+    @apply rounded-xl border border-line bg-bg-surface/60 backdrop-blur;
+  }
+  .link-cyan {
+    @apply text-cyan underline-offset-4 hover:underline;
+  }
+  .err {
+    @apply rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger;
+  }
+  .ok {
+    @apply rounded-lg border border-success/30 bg-success/10 px-4 py-3 text-sm text-success;
+  }
+}
+
+/* Subtle background grid for the auth pages */
+.bg-grid {
+  background-image:
+    radial-gradient(1000px 500px at 10% -10%, rgba(0, 217, 255, 0.08), transparent 60%),
+    radial-gradient(800px 400px at 90% 10%, rgba(127, 119, 221, 0.08), transparent 60%);
+}
