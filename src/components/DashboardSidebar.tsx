@@ -3,12 +3,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const items = [
+const items: {
+  href: string;
+  label: string;
+  icon: string;
+  soon?: boolean;
+}[] = [
   { href: "/dashboard", label: "ダッシュボード", icon: "📊" },
-  { href: "/dashboard/sns", label: "SNS連携", icon: "🔗", soon: true },
-  { href: "/dashboard/posts", label: "投稿設定", icon: "✍️", soon: true },
+  { href: "/dashboard/sns", label: "SNS連携", icon: "🔗" },
+  { href: "/dashboard/posts", label: "投稿履歴", icon: "✍️" },
+  { href: "/dashboard/settings/ai", label: "AI設定", icon: "🧠" },
   { href: "/dashboard/analytics", label: "分析", icon: "📈", soon: true },
-  { href: "/dashboard/settings", label: "設定", icon: "⚙️", soon: true },
 ];
 
 export function DashboardSidebar() {
@@ -17,7 +22,9 @@ export function DashboardSidebar() {
   return (
     <nav className="flex flex-col gap-1 p-4">
       {items.map((item) => {
-        const active = pathname === item.href;
+        const active =
+          pathname === item.href ||
+          (item.href !== "/dashboard" && pathname.startsWith(item.href));
         return (
           <Link
             key={item.href}

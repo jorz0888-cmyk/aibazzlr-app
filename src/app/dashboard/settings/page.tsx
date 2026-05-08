@@ -1,10 +1,5 @@
-import { ComingSoon } from "@/components/ComingSoon";
+import { redirect } from "next/navigation";
 
-export default function SettingsPage() {
-  return (
-    <ComingSoon
-      title="設定"
-      description="プロフィール、請求情報、プランの管理。Stripe Billingと連携予定です。"
-    />
-  );
+export default function SettingsIndex() {
+  redirect("/dashboard/settings/ai");
 }
