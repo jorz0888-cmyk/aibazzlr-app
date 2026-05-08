@@ -51,17 +51,37 @@ export type SocialAccount = {
   updated_at: string;
 };
 
+/** Free-form text values stored in ai_configs.status / posting_frequency. */
+export type AiConfigStatus = string; // e.g. "draft" | "active" | "paused"
+export type PostingFrequency = string; // e.g. "daily" | "weekly" | "custom"
+
+/** Shape of ai_configs.posting_times (jsonb). Keep loose; concrete schema TBD. */
+export type PostingTimes = Record<string, unknown> | null;
+
 export type AiConfig = {
   id: string;
   user_id: string;
   name: string;
+  is_default: boolean;
+  status: AiConfigStatus | null;
   industry: string | null;
+  business_name: string | null;
+  business_description: string | null;
+  persona_role: string | null;
   world_view: string | null;
   voice_tone: string | null;
+  target_audience: string | null;
   ng_words: string[];
+  must_include_elements: string[];
   good_examples: string[];
-  hashtags: string[];
-  is_default: boolean;
+  bad_examples: string[];
+  hashtag_pool: string[];
+  hashtags_per_post: number;
+  posting_frequency: PostingFrequency | null;
+  posting_times: PostingTimes;
+  social_account_ids: string[];
+  generated_system_prompt: string | null;
+  requires_approval: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -90,10 +110,12 @@ export type PromptTemplate = {
   description: string | null;
   default_world_view: string | null;
   default_voice_tone: string | null;
-  default_ng_words: string[];
+  default_persona_role: string | null;
+  default_must_include_elements: string[];
   default_good_examples: string[];
-  default_hashtags: string[];
-  is_active: boolean;
+  default_hashtag_pool: string[];
+  default_ng_words: string[];
+  is_published: boolean;
   display_order: number;
   created_at: string;
   updated_at: string;

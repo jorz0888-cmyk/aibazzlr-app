@@ -12,10 +12,27 @@ export default async function AiSettingsPage() {
   } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const [configs, templates] = await Promise.all([
+  // Fetch in parallel; isolate failures so one query crash doesn't take the
+  // whole page down.
+  const [configsRes, templatesRes] = await Promise.allSettled([
     listAiConfigsByUser(supabase, user.id),
     listActivePromptTemplates(supabase),
   ]);
+
+  const configs: AiConfig[] =
+    configsRes.status === "fulfilled" ? configsRes.value : [];
+  const templates: PromptTemplate[] =
+    templatesRes.status === "fulfilled" ? templatesRes.value : [];
+
+  const errors: string[] = [];
+  if (configsRes.status === "rejected") {
+    errors.push(`AI設定の読み込みに失敗しました: ${describe(configsRes.reason)}`);
+  }
+  if (templatesRes.status === "rejected") {
+    errors.push(
+      `プリセットの読み込みに失敗しました: ${describe(templatesRes.reason)}`,
+    );
+  }
 
   return (
     <div className="space-y-10">
@@ -30,6 +47,14 @@ export default async function AiSettingsPage() {
           ブランドの世界観・トーン・NGワードを定義し、AIに学習させます。
         </p>
       </div>
+
+      {errors.length > 0 && (
+        <div className="err">
+          {errors.map((e, i) => (
+            <div key={i}>{e}</div>
+          ))}
+        </div>
+      )}
 
       {/* My configs */}
       <section className="space-y-4">
@@ -79,6 +104,17 @@ export default async function AiSettingsPage() {
 }
 
 function ConfigCard({ config }: { config: AiConfig }) {
+  // Defensive: array columns might be null if DB default not applied to existing rows.
+  const hashtags = config.hashtag_pool ?? [];
+  const ngWords = config.ng_words ?? [];
+  const goodExamples = config.good_examples ?? [];
+
+  const subtitleParts = [
+    config.industry,
+    config.business_name,
+    config.voice_tone,
+  ].filter(Boolean);
+
   return (
     <li className="card p-5">
       <div className="flex items-start gap-3">
@@ -92,10 +128,14 @@ function ConfigCard({ config }: { config: AiConfig }) {
                 DEFAULT
               </span>
             )}
+            {config.status && (
+              <span className="rounded-full border border-line-strong bg-white/5 px-2 py-0.5 font-mono text-[9px] tracking-wider text-ink-muted">
+                {config.status.toUpperCase()}
+              </span>
+            )}
           </div>
           <div className="mt-1 text-xs text-ink-muted">
-            {config.industry ?? "業種未設定"}
-            {config.voice_tone && ` · ${config.voice_tone}`}
+            {subtitleParts.length > 0 ? subtitleParts.join(" · ") : "未設定"}
           </div>
         </div>
         <button type="button" className="btn-ghost shrink-0" disabled>
@@ -103,14 +143,14 @@ function ConfigCard({ config }: { config: AiConfig }) {
         </button>
       </div>
 
-      {config.world_view && (
+      {(config.world_view || config.business_description) && (
         <p className="mt-4 line-clamp-2 text-sm text-ink-muted">
-          {config.world_view}
+          {config.world_view ?? config.business_description}
         </p>
       )}
 
       <div className="mt-4 flex flex-wrap gap-1.5">
-        {config.hashtags.slice(0, 6).map((h) => (
+        {hashtags.slice(0, 6).map((h) => (
           <span
             key={h}
             className="rounded-full border border-cyan/25 bg-cyan/5 px-2 py-0.5 font-mono text-[10px] text-cyan"
@@ -118,14 +158,19 @@ function ConfigCard({ config }: { config: AiConfig }) {
             {h.startsWith("#") ? h : `#${h}`}
           </span>
         ))}
-        {config.ng_words.length > 0 && (
+        {ngWords.length > 0 && (
           <span className="rounded-full border border-danger/25 bg-danger/5 px-2 py-0.5 font-mono text-[10px] text-danger">
-            NG: {config.ng_words.length}
+            NG: {ngWords.length}
           </span>
         )}
-        {config.good_examples.length > 0 && (
+        {goodExamples.length > 0 && (
           <span className="rounded-full border border-line-strong bg-white/5 px-2 py-0.5 font-mono text-[10px] text-ink-muted">
-            良い例: {config.good_examples.length}件
+            良い例: {goodExamples.length}件
+          </span>
+        )}
+        {config.requires_approval && (
+          <span className="rounded-full border border-accent/25 bg-accent/5 px-2 py-0.5 font-mono text-[10px] text-accent">
+            承認制
           </span>
         )}
       </div>
@@ -134,6 +179,9 @@ function ConfigCard({ config }: { config: AiConfig }) {
 }
 
 function TemplateCard({ template }: { template: PromptTemplate }) {
+  const tone =
+    template.default_voice_tone ?? template.default_persona_role ?? null;
+
   return (
     <li className="card p-5">
       <div className="flex items-center gap-2">
@@ -145,9 +193,9 @@ function TemplateCard({ template }: { template: PromptTemplate }) {
       {template.description && (
         <p className="mt-2 text-xs text-ink-muted">{template.description}</p>
       )}
-      {template.default_voice_tone && (
+      {tone && (
         <p className="mt-3 font-mono text-[11px] text-ink-subtle">
-          tone: {template.default_voice_tone}
+          tone: {tone}
         </p>
       )}
       <button type="button" className="btn-secondary mt-4 w-full" disabled>
@@ -172,4 +220,13 @@ function EmptyConfig() {
       </button>
     </div>
   );
+}
+
+function describe(reason: unknown): string {
+  if (reason instanceof Error) return reason.message;
+  if (typeof reason === "object" && reason !== null && "message" in reason) {
+    const m = (reason as { message?: unknown }).message;
+    if (typeof m === "string") return m;
+  }
+  return "詳細不明のエラー";
 }

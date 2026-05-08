@@ -9,7 +9,7 @@ export async function listActivePromptTemplates(
   const { data, error } = await supabase
     .from(TABLE)
     .select("*")
-    .eq("is_active", true)
+    .eq("is_published", true)
     .order("display_order", { ascending: true })
     .order("industry", { ascending: true });
 
@@ -25,7 +25,7 @@ export async function listPromptTemplatesByIndustry(
     .from(TABLE)
     .select("*")
     .eq("industry", industry)
-    .eq("is_active", true)
+    .eq("is_published", true)
     .order("display_order", { ascending: true });
 
   if (error) throw error;
@@ -50,7 +50,7 @@ export async function listIndustries(supabase: DB): Promise<string[]> {
   const { data, error } = await supabase
     .from(TABLE)
     .select("industry")
-    .eq("is_active", true);
+    .eq("is_published", true);
 
   if (error) throw error;
   const set = new Set<string>();

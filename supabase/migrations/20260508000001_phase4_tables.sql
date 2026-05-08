@@ -2,10 +2,8 @@
 -- 20260508000001_phase4_tables.sql
 -- Phase 4: SNS連携 / AI設定 / 投稿 / 業種別プリセット
 --
--- NOTE:
---   The fields here were inferred from the Phase 4 spec. If your live Supabase
---   schema differs (extra columns, different defaults, etc.), reconcile with
---   `supabase db diff` and adjust this migration before applying.
+-- Reflects the actual production schema as of 2026-05-08.
+-- If you change a column, also update src/lib/supabase/types.ts to match.
 -- ============================================================================
 
 -- ---------------------------------------------------------------------------
@@ -37,7 +35,6 @@ create index if not exists social_accounts_user_idx
 create index if not exists social_accounts_status_idx
   on public.social_accounts (status);
 
--- Only one primary account per (user, platform)
 create unique index if not exists social_accounts_one_primary_per_platform
   on public.social_accounts (user_id, platform)
   where is_primary;
@@ -46,23 +43,35 @@ create unique index if not exists social_accounts_one_primary_per_platform
 -- 2. ai_configs -- AI設定
 -- ---------------------------------------------------------------------------
 create table if not exists public.ai_configs (
-  id                uuid primary key default gen_random_uuid(),
-  user_id           uuid not null references auth.users(id) on delete cascade,
-  name              text not null,
-  industry          text,
-  world_view        text,
-  voice_tone        text,
-  ng_words          text[] not null default '{}',
-  good_examples     text[] not null default '{}',
-  hashtags          text[] not null default '{}',
-  is_default        boolean not null default false,
-  created_at        timestamptz not null default now(),
-  updated_at        timestamptz not null default now()
+  id                          uuid primary key default gen_random_uuid(),
+  user_id                     uuid not null references auth.users(id) on delete cascade,
+  name                        text not null,
+  is_default                  boolean not null default false,
+  status                      text,
+  industry                    text,
+  business_name               text,
+  business_description        text,
+  persona_role                text,
+  world_view                  text,
+  voice_tone                  text,
+  target_audience             text,
+  ng_words                    text[] not null default '{}',
+  must_include_elements       text[] not null default '{}',
+  good_examples               text[] not null default '{}',
+  bad_examples                text[] not null default '{}',
+  hashtag_pool                text[] not null default '{}',
+  hashtags_per_post           integer not null default 0,
+  posting_frequency           text,
+  posting_times               jsonb,
+  social_account_ids          uuid[] not null default '{}',
+  generated_system_prompt     text,
+  requires_approval           boolean not null default true,
+  created_at                  timestamptz not null default now(),
+  updated_at                  timestamptz not null default now()
 );
 
 create index if not exists ai_configs_user_idx on public.ai_configs (user_id);
 
--- Only one default config per user
 create unique index if not exists ai_configs_one_default_per_user
   on public.ai_configs (user_id)
   where is_default;
@@ -100,26 +109,28 @@ create index if not exists posts_scheduled_idx
 -- 4. prompt_templates -- 業種別プリセット (global, no user_id)
 -- ---------------------------------------------------------------------------
 create table if not exists public.prompt_templates (
-  id                       uuid primary key default gen_random_uuid(),
-  industry                 text not null,
-  name                     text not null,
-  description              text,
-  default_world_view       text,
-  default_voice_tone       text,
-  default_ng_words         text[] not null default '{}',
-  default_good_examples    text[] not null default '{}',
-  default_hashtags         text[] not null default '{}',
-  is_active                boolean not null default true,
-  display_order            integer not null default 0,
-  created_at               timestamptz not null default now(),
-  updated_at               timestamptz not null default now(),
+  id                              uuid primary key default gen_random_uuid(),
+  industry                        text not null,
+  name                            text not null,
+  description                     text,
+  default_world_view              text,
+  default_voice_tone              text,
+  default_persona_role            text,
+  default_must_include_elements   text[] not null default '{}',
+  default_good_examples           text[] not null default '{}',
+  default_hashtag_pool            text[] not null default '{}',
+  default_ng_words                text[] not null default '{}',
+  is_published                    boolean not null default false,
+  display_order                   integer not null default 0,
+  created_at                      timestamptz not null default now(),
+  updated_at                      timestamptz not null default now(),
 
   unique (industry, name)
 );
 
 create index if not exists prompt_templates_industry_idx
   on public.prompt_templates (industry)
-  where is_active;
+  where is_published;
 
 -- ---------------------------------------------------------------------------
 -- 5. updated_at triggers (re-uses public.set_updated_at from initial migration)
@@ -220,11 +231,11 @@ create policy "posts: own row delete"
   on public.posts for delete
   using (auth.uid() = user_id);
 
--- prompt_templates: read-only for all signed-in users ----------------------
+-- prompt_templates: read-only (only published) for any signed-in user ------
 alter table public.prompt_templates enable row level security;
 
 drop policy if exists "prompt_templates: read for authenticated" on public.prompt_templates;
 create policy "prompt_templates: read for authenticated"
   on public.prompt_templates for select
   to authenticated
-  using (is_active);
+  using (is_published);
