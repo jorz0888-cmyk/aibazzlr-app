@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { listAiConfigsByUser } from "@/lib/db/ai-configs";
 import { listActivePromptTemplates } from "@/lib/db/prompt-templates";
@@ -62,9 +63,9 @@ export default async function AiSettingsPage() {
           <h2 className="text-sm font-bold uppercase tracking-wider text-ink-muted">
             自分の設定
           </h2>
-          <button type="button" className="btn-primary" disabled>
+          <Link href="/dashboard/settings/ai/new" className="btn-primary">
             + 新規作成
-          </button>
+          </Link>
         </div>
 
         {configs.length === 0 ? (
@@ -116,11 +117,14 @@ function ConfigCard({ config }: { config: AiConfig }) {
   ].filter(Boolean);
 
   return (
-    <li className="card p-5">
+    <li className="card p-5 transition hover:border-cyan/30">
       <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1">
+        <Link
+          href={`/dashboard/settings/ai/${config.id}`}
+          className="min-w-0 flex-1 group"
+        >
           <div className="flex items-center gap-2">
-            <h3 className="truncate text-base font-bold text-ink">
+            <h3 className="truncate text-base font-bold text-ink group-hover:text-cyan">
               {config.name}
             </h3>
             {config.is_default && (
@@ -137,10 +141,21 @@ function ConfigCard({ config }: { config: AiConfig }) {
           <div className="mt-1 text-xs text-ink-muted">
             {subtitleParts.length > 0 ? subtitleParts.join(" · ") : "未設定"}
           </div>
+        </Link>
+        <div className="flex shrink-0 gap-1">
+          <Link
+            href={`/dashboard/settings/ai/${config.id}`}
+            className="btn-ghost"
+          >
+            詳細
+          </Link>
+          <Link
+            href={`/dashboard/settings/ai/${config.id}/edit`}
+            className="btn-ghost"
+          >
+            編集
+          </Link>
         </div>
-        <button type="button" className="btn-ghost shrink-0" disabled>
-          編集
-        </button>
       </div>
 
       {(config.world_view || config.business_description) && (
@@ -198,9 +213,12 @@ function TemplateCard({ template }: { template: PromptTemplate }) {
           tone: {tone}
         </p>
       )}
-      <button type="button" className="btn-secondary mt-4 w-full" disabled>
+      <Link
+        href={`/dashboard/settings/ai/new/hearing?industry=${encodeURIComponent(template.industry)}`}
+        className="btn-secondary mt-4 w-full"
+      >
         このプリセットから作成
-      </button>
+      </Link>
     </li>
   );
 }
@@ -215,9 +233,9 @@ function EmptyConfig() {
       <p className="mt-1 max-w-sm text-xs text-ink-muted">
         ブランドの世界観や口調を登録すると、AIが「あなたらしい」投稿を生成できるようになります。
       </p>
-      <button type="button" className="btn-primary mt-5" disabled>
+      <Link href="/dashboard/settings/ai/new" className="btn-primary mt-5">
         最初のAI設定を作成
-      </button>
+      </Link>
     </div>
   );
 }

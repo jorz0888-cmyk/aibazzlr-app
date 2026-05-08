@@ -121,6 +121,47 @@ export type PromptTemplate = {
   updated_at: string;
 };
 
+// ---- AI Hearing Sessions ------------------------------------------------
+export type HearingSessionStatus = "in_progress" | "completed" | "abandoned";
+
+export type HearingMessage = {
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+};
+
+export type ExtractedHearingData = {
+  complete?: boolean;
+  industry?: string;
+  business_name?: string;
+  business_description?: string;
+  persona_role?: string;
+  world_view?: string;
+  voice_tone?: string;
+  target_audience?: string;
+  must_include_elements?: string[];
+  good_examples?: string[];
+  ng_words?: string[];
+  hashtag_pool?: string[];
+  summary_message?: string;
+};
+
+export type AiHearingSession = {
+  id: string;
+  user_id: string;
+  status: HearingSessionStatus;
+  industry: string | null;
+  messages: HearingMessage[];
+  extracted_data: ExtractedHearingData | null;
+  finalized_prompt: string | null;
+  current_step: number;
+  ai_config_id: string | null;
+  started_at: string;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 // ---- Insert / Update payloads -------------------------------------------
 type Insertable<T extends { id: string; created_at: string; updated_at: string }> = Omit<
   T,
@@ -143,6 +184,9 @@ export type PostUpdate = Updatable<Post>;
 
 export type PromptTemplateInsert = Insertable<PromptTemplate>;
 export type PromptTemplateUpdate = Updatable<PromptTemplate>;
+
+export type AiHearingSessionInsert = Insertable<AiHearingSession>;
+export type AiHearingSessionUpdate = Updatable<AiHearingSession>;
 
 // ---- Database (for typed Supabase client) -------------------------------
 export type Database = {
@@ -176,6 +220,12 @@ export type Database = {
         Row: PromptTemplate;
         Insert: PromptTemplateInsert;
         Update: PromptTemplateUpdate;
+        Relationships: [];
+      };
+      ai_hearing_sessions: {
+        Row: AiHearingSession;
+        Insert: AiHearingSessionInsert;
+        Update: AiHearingSessionUpdate;
         Relationships: [];
       };
     };
