@@ -5,9 +5,9 @@ import Anthropic from "@anthropic-ai/sdk";
  * Models can be overridden via env to roll out new versions without redeploying.
  */
 export const HEARING_MODEL =
-  process.env.ANTHROPIC_HEARING_MODEL ?? "claude-sonnet-4-5";
+  process.env.ANTHROPIC_HEARING_MODEL ?? "claude-haiku-4-5";
 export const FINALIZE_MODEL =
-  process.env.ANTHROPIC_FINALIZE_MODEL ?? "claude-sonnet-4-5";
+  process.env.ANTHROPIC_FINALIZE_MODEL ?? "claude-haiku-4-5";
 
 let _client: Anthropic | null = null;
 

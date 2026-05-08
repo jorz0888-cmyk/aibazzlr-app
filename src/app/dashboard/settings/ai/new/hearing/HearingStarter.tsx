@@ -27,12 +27,28 @@ export function HearingStarter() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ industry: industry || null }),
       });
+      const body = (await res.json().catch(() => null)) as
+        | {
+            sessionId?: string;
+            error?: string;
+            debug?: { code?: string | null; hint?: string | null };
+          }
+        | null;
+
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error ?? `HTTP ${res.status}`);
+        const detail = body?.debug?.code
+          ? ` (code: ${body.debug.code}${body.debug.hint ? ` / hint: ${body.debug.hint}` : ""})`
+          : "";
+        throw new Error(`${body?.error ?? `HTTP ${res.status}`}${detail}`);
       }
-      const { sessionId } = (await res.json()) as { sessionId: string };
-      router.push(`/dashboard/settings/ai/new/hearing/${sessionId}`);
+
+      if (!body?.sessionId) {
+        throw new Error(
+          "サーバから sessionId が返されませんでした",
+        );
+      }
+
+      router.push(`/dashboard/settings/ai/new/hearing/${body.sessionId}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "開始に失敗しました");
       setStarting(false);

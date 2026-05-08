@@ -163,11 +163,15 @@ export type AiHearingSession = {
 };
 
 // ---- Insert / Update payloads -------------------------------------------
-type Insertable<T extends { id: string; created_at: string; updated_at: string }> = Omit<
-  T,
-  "id" | "created_at" | "updated_at"
-> &
-  Partial<Pick<T, "id">>;
+// Insert payloads are intentionally permissive: every field is optional so
+// that DB defaults (timestamps, status, current_step, etc.) can fill in
+// what callers omit. Required fields (e.g. user_id, content) are enforced
+// at runtime by the DB's NOT NULL constraints, which surface as proper
+// errors via the API rather than blocking compile-time when we want to
+// insert with minimal payloads.
+type Insertable<T extends { id: string; created_at: string; updated_at: string }> = Partial<
+  Omit<T, "created_at" | "updated_at">
+>;
 
 type Updatable<T> = Partial<
   Omit<T, "id" | "user_id" | "created_at" | "updated_at">

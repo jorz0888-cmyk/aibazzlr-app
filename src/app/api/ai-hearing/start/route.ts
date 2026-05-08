@@ -1,22 +1,66 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createHearingSession } from "@/lib/db/ai-hearing-sessions";
 import { HEARING_OPENING_MESSAGE } from "@/lib/ai/hearing-prompts";
 import type { HearingMessage } from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
 
+/**
+ * Build a user-facing error message that surfaces the actual Postgres / RLS
+ * error rather than the opaque "Failed to start hearing session".
+ */
+function describeDbError(e: unknown): string {
+  if (e && typeof e === "object") {
+    const obj = e as {
+      message?: unknown;
+      code?: unknown;
+      details?: unknown;
+      hint?: unknown;
+    };
+    const parts: string[] = [];
+    if (typeof obj.code === "string" && obj.code) parts.push(`[${obj.code}]`);
+    if (typeof obj.message === "string" && obj.message) parts.push(obj.message);
+    if (typeof obj.details === "string" && obj.details) parts.push(obj.details);
+    if (typeof obj.hint === "string" && obj.hint)
+      parts.push(`hint: ${obj.hint}`);
+    if (parts.length > 0) return parts.join(" ");
+  }
+  if (e instanceof Error) return e.message;
+  return "詳細不明のエラー";
+}
+
 export async function POST(request: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // 1. Auth ----------------------------------------------------------------
+  let supabase;
+  try {
+    supabase = await createClient();
+  } catch (e) {
+    console.error("[hearing/start] supabase client init failed", e);
+    return NextResponse.json(
+      {
+        error: `Supabaseクライアントの初期化に失敗しました: ${describeDbError(e)}`,
+      },
+      { status: 500 },
+    );
   }
 
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+  if (authError || !user) {
+    return NextResponse.json(
+      {
+        error:
+          "認証セッションの取得に失敗しました。再度ログインしてからお試しください。",
+      },
+      { status: 401 },
+    );
+  }
+
+  // 2. Body ----------------------------------------------------------------
   const body = (await request.json().catch(() => ({}))) as {
-    industry?: string;
+    industry?: string | null;
   };
 
   const opening: HearingMessage = {
@@ -25,26 +69,55 @@ export async function POST(request: NextRequest) {
     created_at: new Date().toISOString(),
   };
 
-  try {
-    const session = await createHearingSession(supabase, {
-      user_id: user.id,
-      status: "in_progress",
-      industry: body.industry ?? null,
-      messages: [opening],
-      current_step: 1,
-      extracted_data: null,
-      finalized_prompt: null,
-      ai_config_id: null,
-      started_at: new Date().toISOString(),
-      completed_at: null,
-    });
+  // 3. Insert (minimal payload — let DB defaults handle status, current_step,
+  //    started_at, completed_at, extracted_data, finalized_prompt, ai_config_id) -----
+  const insertPayload = {
+    user_id: user.id,
+    industry: body.industry ?? null,
+    messages: [opening],
+  };
 
-    return NextResponse.json({ sessionId: session.id });
-  } catch (e) {
-    console.error("[hearing/start]", e);
+  const { data, error } = await supabase
+    .from("ai_hearing_sessions")
+    .insert(insertPayload)
+    .select("id")
+    .single();
+
+  if (error) {
+    console.error("[hearing/start] insert failed", {
+      error,
+      payload: insertPayload,
+      userId: user.id,
+    });
     return NextResponse.json(
-      { error: "Failed to start hearing session" },
+      {
+        error: `セッション作成に失敗: ${describeDbError(error)}`,
+        debug: {
+          code: (error as { code?: string }).code ?? null,
+          hint: (error as { hint?: string }).hint ?? null,
+        },
+      },
       { status: 500 },
     );
   }
+
+  if (!data?.id) {
+    return NextResponse.json(
+      { error: "セッションは作成されましたがIDが返されませんでした" },
+      { status: 500 },
+    );
+  }
+
+  // 4. Best-effort: bump current_step to 1 (skip silently if column missing) -
+  await supabase
+    .from("ai_hearing_sessions")
+    .update({ current_step: 1 })
+    .eq("id", data.id)
+    .then(({ error: stepErr }) => {
+      if (stepErr) {
+        console.warn("[hearing/start] current_step update skipped", stepErr);
+      }
+    });
+
+  return NextResponse.json({ sessionId: data.id });
 }
