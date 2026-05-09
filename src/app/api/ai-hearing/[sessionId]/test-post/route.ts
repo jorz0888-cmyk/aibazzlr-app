@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getHearingSession } from "@/lib/db/ai-hearing-sessions";
 import { getAnthropic, HEARING_MODEL } from "@/lib/ai/anthropic";
+import { normalizeAccountMode, type AccountMode } from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -10,7 +11,7 @@ type Ctx = { params: Promise<{ sessionId: string }> };
 
 const DAYS = ["日", "月", "火", "水", "木", "金", "土"] as const;
 
-function buildUserPrompt(): string {
+function buildFictionalUserPrompt(): string {
   const today = new Date();
   const dow = DAYS[today.getDay()];
   const month = today.getMonth() + 1;
@@ -37,6 +38,45 @@ JSONのみ。説明や前置き不要：
   "theme_summary": "今回選んだテーマの一言要約（25字以内）"
 }
 \`\`\``;
+}
+
+function buildRealUserPrompt(): string {
+  const today = new Date();
+  const dow = DAYS[today.getDay()];
+  const month = today.getMonth() + 1;
+  const day = today.getDate();
+
+  return `今日は${month}月${day}日（${dow}）です。
+
+【重要：捏造禁止】
+- システムプロンプトに記載された実情報のみを使ってください
+- 架空のお客様や架空のエピソードを絶対に作らない
+- 確認できない数字・年数・固有名詞を作らない
+- 実情報が足りないテーマは選ばない
+
+X（Twitter）への投稿を1つ作ってください。
+
+【テーマ例（実情報がある中から選ぶ）】
+- 今日のおすすめメニュー（看板メニュー or 季節限定）
+- 営業情報の告知（今週の定休日、営業時間、特別営業など）
+- 季節限定・日替わりの紹介
+- 客層に役立つ実用情報
+- 許可済みの実話エピソード（ストックがある場合のみ）
+
+【出力形式】
+JSONのみ。説明や前置き不要：
+
+\`\`\`json
+{
+  "tweet": "投稿文（200〜280字、ハッシュタグ含む、URLなし、文頭に=や記号入れない、実情報のみ）",
+  "image_concept": "投稿に合う画像のコンセプト（日本語で30字以内、誰でもイメージできる絵）",
+  "theme_summary": "今回選んだテーマの一言要約（25字以内）"
+}
+\`\`\``;
+}
+
+function buildUserPromptFor(mode: AccountMode): string {
+  return mode === "real" ? buildRealUserPrompt() : buildFictionalUserPrompt();
 }
 
 function extractJSON(text: string): {
@@ -134,7 +174,14 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
       model: HEARING_MODEL,
       max_tokens: 1500,
       system: session.generated_system_prompt,
-      messages: [{ role: "user", content: buildUserPrompt() }],
+      messages: [
+        {
+          role: "user",
+          content: buildUserPromptFor(
+            normalizeAccountMode(session.account_mode),
+          ),
+        },
+      ],
     });
   } catch (e) {
     console.error("[test-post] anthropic call failed", e);

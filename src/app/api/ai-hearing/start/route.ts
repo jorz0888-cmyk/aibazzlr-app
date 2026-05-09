@@ -1,7 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { HEARING_OPENING_MESSAGE } from "@/lib/ai/hearing-prompts";
-import type { HearingMessage } from "@/lib/supabase/types";
+import { openingMessageFor } from "@/lib/ai/hearing-prompts";
+import {
+  normalizeAccountMode,
+  type HearingMessage,
+} from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
 
@@ -61,11 +64,14 @@ export async function POST(request: NextRequest) {
   // 2. Body ----------------------------------------------------------------
   const body = (await request.json().catch(() => ({}))) as {
     industry?: string | null;
+    account_mode?: string;
   };
+
+  const accountMode = normalizeAccountMode(body.account_mode);
 
   const opening: HearingMessage = {
     role: "assistant",
-    content: HEARING_OPENING_MESSAGE,
+    content: openingMessageFor(accountMode),
     created_at: new Date().toISOString(),
   };
 
@@ -74,6 +80,7 @@ export async function POST(request: NextRequest) {
   const insertPayload = {
     user_id: user.id,
     industry: body.industry ?? null,
+    account_mode: accountMode,
     messages: [opening],
   };
 

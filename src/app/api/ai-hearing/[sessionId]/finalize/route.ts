@@ -5,12 +5,15 @@ import {
   updateHearingSession,
 } from "@/lib/db/ai-hearing-sessions";
 import { getAnthropic, FINALIZE_MODEL } from "@/lib/ai/anthropic";
-import { HEARING_INTERVIEWER_PROMPT } from "@/lib/ai/hearing-prompts";
+import { interviewerPromptFor } from "@/lib/ai/hearing-prompts";
 import {
-  buildV14SystemPrompt,
+  buildSystemPromptForMode,
   tryExtractFinalJson,
 } from "@/lib/ai/v14-builder";
-import type { ExtractedHearingData } from "@/lib/supabase/types";
+import {
+  normalizeAccountMode,
+  type ExtractedHearingData,
+} from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -153,6 +156,8 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
     });
   }
 
+  const sessionMode = normalizeAccountMode(session.account_mode);
+
   // First, try to extract from the most recent assistant message in case the
   // streaming endpoint missed it.
   const lastAssistant = [...session.messages]
@@ -161,7 +166,8 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
   if (lastAssistant) {
     const extracted = tryExtractFinalJson(lastAssistant.content);
     if (extracted) {
-      const prompt = buildV14SystemPrompt(extracted);
+      if (!extracted.account_mode) extracted.account_mode = sessionMode;
+      const prompt = buildSystemPromptForMode(extracted, sessionMode);
       const saveRes = await saveFinalized(
         supabase,
         sessionId,
@@ -199,7 +205,7 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
     resp = await anthropic.messages.create({
       model: FINALIZE_MODEL,
       max_tokens: 4000,
-      system: HEARING_INTERVIEWER_PROMPT,
+      system: interviewerPromptFor(sessionMode),
       messages: apiMessages,
     });
   } catch (e) {
@@ -230,7 +236,8 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
     );
   }
 
-  const prompt = buildV14SystemPrompt(extracted);
+  if (!extracted.account_mode) extracted.account_mode = sessionMode;
+  const prompt = buildSystemPromptForMode(extracted, sessionMode);
 
   const saveRes = await saveFinalized(supabase, sessionId, extracted, prompt);
   if (!saveRes.ok) {

@@ -1,4 +1,107 @@
-import type { ExtractedHearingData } from "@/lib/supabase/types";
+import type { AccountMode, ExtractedHearingData } from "@/lib/supabase/types";
+
+/**
+ * Top-level builder: dispatches to real-mode or fictional-mode v14 builder
+ * based on the extracted account_mode (defaults to 'real' for safety).
+ */
+export function buildSystemPromptForMode(
+  d: ExtractedHearingData,
+  mode: AccountMode,
+): string {
+  if (mode === "real") return buildRealSystemPrompt(d);
+  return buildV14SystemPrompt(d);
+}
+
+/**
+ * REAL MODE — strict no-fabrication system prompt for actual businesses.
+ */
+export function buildRealSystemPrompt(d: ExtractedHearingData): string {
+  const businessName = d.business_name?.trim() || "（店名未設定）";
+  const industry = d.industry?.trim() || "店舗";
+  const address = d.address?.trim() || "";
+  const businessHours = d.business_hours?.trim() || "";
+  const closedDays = d.closed_days?.trim() || "";
+  const priceRange = d.price_range?.trim() || "";
+  const target = d.target_audience?.trim() || "";
+  const voiceTone = d.voice_tone?.trim() || "";
+
+  const menu = (d.menu_items ?? []).filter(Boolean);
+  const seasonal = (d.seasonal_items ?? []).filter(Boolean);
+  const episodes = (d.real_episodes ?? []).filter(Boolean);
+  const announcements = (d.announcement_topics ?? []).filter(Boolean);
+  const ng = (d.ng_words ?? []).filter(Boolean);
+  const hashtags = (d.hashtag_pool ?? []).filter(Boolean);
+
+  const fmtList = (items: string[], emptyMsg: string) =>
+    items.length > 0
+      ? items.map((m) => `- ${m}`).join("\n")
+      : `（${emptyMsg}）`;
+
+  const headerParts = [
+    address && address,
+    `${industry}`,
+  ].filter(Boolean);
+
+  return `あなたは${businessName}のSNS担当です。
+
+【絶対の世界観】
+${businessName}は${headerParts.join("にある") || industry}。
+${businessHours ? `営業時間: ${businessHours}\n` : ""}${closedDays ? `定休日: ${closedDays}\n` : ""}${priceRange ? `価格帯: ${priceRange}` : ""}
+
+【絶対ルール：捏造禁止】
+- 架空の人物（「常連の田中さん」など）を作らない
+- 架空のエピソードを作らない
+- 実際にない金額・年数・実績を作らない
+- 不確かな情報は使わない
+- 迷ったら「これは事実か？」を自問。事実でなければ書かない
+
+【投稿の素材（これらの実情報のみ使用可）】
+■ 看板メニュー
+${fmtList(menu, "未登録")}
+
+■ 季節限定・日替わり
+${fmtList(seasonal, "未登録")}
+
+■ 実話エピソード（許可済みのみ）
+${fmtList(episodes, "未登録 — エピソード投稿は控える")}
+
+■ 告知テーマ
+${fmtList(announcements, "未登録")}
+
+【投稿カテゴリのローテーション】
+- メニュー紹介（看板メニュー・季節限定）
+- 営業情報告知（定休日変更・営業時間変更・年末年始）
+- 客層に向けた実用情報
+- 実話エピソード（許可取った範囲のみ）
+- 業界トリビア（このお店ならではの視点）
+
+【声のトーン】
+${voiceTone || "親しみやすく丁寧"}
+
+【ターゲット読者】
+${target || "お店に来店してくれるお客様"}
+
+【絶対NGワード】
+${
+  ng.length > 0
+    ? ng.map((w) => `× ${w}`).join("\n")
+    : "× （未設定）"
+}
+× 「絶対稼げる」「誰でも」「100%」などの煽り
+× 情報商材臭
+
+【ハッシュタグ】
+2〜3個を以下から自然に選ぶ：
+${hashtags.length > 0 ? hashtags.join(" / ") : "（未登録）"}
+
+【投稿の必須要素】
+- 実情報のみ
+- 嘘・誇張・誇大広告禁止
+- お客に役立つ情報優先
+- 親しみやすく、押し付けない
+- 「！」3連続以上禁止
+- 文頭を記号や = で始めない`;
+}
 
 /**
  * Compose the v14-style system prompt that will be used by the SNS-posting AI

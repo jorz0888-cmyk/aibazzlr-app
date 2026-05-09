@@ -23,6 +23,16 @@ export type PostStatus =
 
 export type Plan = "free" | "starter" | "pro";
 
+/** Account mode — separates real businesses from fictional/persona brands. */
+export type AccountMode = "real" | "fictional";
+
+export const DEFAULT_ACCOUNT_MODE: AccountMode = "real";
+
+/** Normalize an arbitrary value to a valid AccountMode. */
+export function normalizeAccountMode(v: unknown): AccountMode {
+  return v === "fictional" ? "fictional" : "real";
+}
+
 // ---- Row shapes ----------------------------------------------------------
 export type Profile = {
   id: string;
@@ -82,6 +92,17 @@ export type AiConfig = {
   social_account_ids: string[];
   generated_system_prompt: string | null;
   requires_approval: boolean;
+  // -- Phase 5.8: account mode + real-mode fields --
+  account_mode: AccountMode;
+  business_hours: string | null;
+  closed_days: string | null;
+  address: string | null;
+  price_range: string | null;
+  menu_items: string[];
+  seasonal_items: string[];
+  real_episodes: string[];
+  announcement_topics: string[];
+  // ----------------------------------------------
   created_at: string;
   updated_at: string;
 };
@@ -132,6 +153,7 @@ export type HearingMessage = {
 
 export type ExtractedHearingData = {
   complete?: boolean;
+  account_mode?: AccountMode;
   industry?: string;
   business_name?: string;
   business_description?: string;
@@ -144,6 +166,15 @@ export type ExtractedHearingData = {
   ng_words?: string[];
   hashtag_pool?: string[];
   summary_message?: string;
+  // -- Real-mode fields (only populated when account_mode === 'real') --
+  business_hours?: string;
+  closed_days?: string;
+  address?: string;
+  price_range?: string;
+  menu_items?: string[];
+  seasonal_items?: string[];
+  real_episodes?: string[];
+  announcement_topics?: string[];
 };
 
 export type AiHearingSession = {
@@ -151,6 +182,7 @@ export type AiHearingSession = {
   user_id: string;
   status: HearingSessionStatus;
   industry: string | null;
+  account_mode: AccountMode;
   messages: HearingMessage[];
   extracted_data: ExtractedHearingData | null;
   generated_system_prompt: string | null;

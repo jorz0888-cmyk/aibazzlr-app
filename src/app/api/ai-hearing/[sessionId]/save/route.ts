@@ -5,7 +5,11 @@ import {
   updateHearingSession,
 } from "@/lib/db/ai-hearing-sessions";
 import { createAiConfig, setDefaultAiConfig } from "@/lib/db/ai-configs";
-import type { AiConfigInsert, ExtractedHearingData } from "@/lib/supabase/types";
+import {
+  normalizeAccountMode,
+  type AiConfigInsert,
+  type ExtractedHearingData,
+} from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
 
@@ -62,11 +66,20 @@ export async function POST(request: NextRequest, { params }: Ctx) {
     body.prompt_overrides?.finalized_prompt ??
     session.generated_system_prompt;
 
+  // Resolve account_mode: extracted > session > default('real')
+  const accountMode = normalizeAccountMode(
+    data.account_mode ?? session.account_mode,
+  );
+
+  const ensureArray = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+
   const insert: AiConfigInsert = {
     user_id: user.id,
     name: body.name?.trim() || data.business_name?.trim() || "新しいAI設定",
     is_default: false,
     status: "active",
+    account_mode: accountMode,
     industry: data.industry ?? session.industry ?? null,
     business_name: data.business_name ?? null,
     business_description: data.business_description ?? null,
@@ -74,17 +87,26 @@ export async function POST(request: NextRequest, { params }: Ctx) {
     world_view: data.world_view ?? null,
     voice_tone: data.voice_tone ?? null,
     target_audience: data.target_audience ?? null,
-    ng_words: data.ng_words ?? [],
-    must_include_elements: data.must_include_elements ?? [],
-    good_examples: data.good_examples ?? [],
+    ng_words: ensureArray(data.ng_words),
+    must_include_elements: ensureArray(data.must_include_elements),
+    good_examples: ensureArray(data.good_examples),
     bad_examples: [],
-    hashtag_pool: data.hashtag_pool ?? [],
+    hashtag_pool: ensureArray(data.hashtag_pool),
     hashtags_per_post: 3,
     posting_frequency: null,
     posting_times: null,
     social_account_ids: [],
     generated_system_prompt: finalizedPrompt,
     requires_approval: true,
+    // Real-mode-only fields (safe to send for fictional too — DB defaults to '' / [])
+    business_hours: data.business_hours ?? null,
+    closed_days: data.closed_days ?? null,
+    address: data.address ?? null,
+    price_range: data.price_range ?? null,
+    menu_items: ensureArray(data.menu_items),
+    seasonal_items: ensureArray(data.seasonal_items),
+    real_episodes: ensureArray(data.real_episodes),
+    announcement_topics: ensureArray(data.announcement_topics),
   };
 
   let configId: string;

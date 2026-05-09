@@ -6,15 +6,18 @@ import {
 } from "@/lib/db/ai-hearing-sessions";
 import { getAnthropic, HEARING_MODEL } from "@/lib/ai/anthropic";
 import {
-  HEARING_INTERVIEWER_PROMPT,
+  interviewerPromptFor,
   TOTAL_HEARING_STEPS,
 } from "@/lib/ai/hearing-prompts";
 import {
-  buildV14SystemPrompt,
+  buildSystemPromptForMode,
   stripJsonFence,
   tryExtractFinalJson,
 } from "@/lib/ai/v14-builder";
-import type { HearingMessage } from "@/lib/supabase/types";
+import {
+  normalizeAccountMode,
+  type HearingMessage,
+} from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
 // Allow long-running streamed responses (Claude completion + DB write +
@@ -84,10 +87,11 @@ export async function POST(request: NextRequest, { params }: Ctx) {
           content: m.content,
         }));
 
+        const sessionMode = normalizeAccountMode(session.account_mode);
         const aiStream = anthropic.messages.stream({
           model: HEARING_MODEL,
           max_tokens: 3000, // headroom for JSON output (~2k tokens)
-          system: HEARING_INTERVIEWER_PROMPT,
+          system: interviewerPromptFor(sessionMode),
           messages: apiMessages,
         });
 
@@ -131,7 +135,14 @@ export async function POST(request: NextRequest, { params }: Ctx) {
         const visibleText = stripJsonFence(fullText);
 
         if (extracted) {
-          const generatedPrompt = buildV14SystemPrompt(extracted);
+          const sessionMode = normalizeAccountMode(session.account_mode);
+          // Make sure the extracted data carries the correct mode tag so
+          // downstream save/reload knows which template was used.
+          if (!extracted.account_mode) extracted.account_mode = sessionMode;
+          const generatedPrompt = buildSystemPromptForMode(
+            extracted,
+            sessionMode,
+          );
           // Try the full update; if a column doesn't exist (42703), fall
           // back to the minimal set so we at least flip the status.
           const fullPatch = {

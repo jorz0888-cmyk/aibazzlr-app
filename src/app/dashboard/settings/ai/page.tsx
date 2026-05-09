@@ -124,6 +124,7 @@ function ConfigCard({ config }: { config: AiConfig }) {
           className="min-w-0 flex-1 group"
         >
           <div className="flex items-center gap-2">
+            <ModeBadge mode={config.account_mode} />
             <h3 className="truncate text-base font-bold text-ink group-hover:text-cyan">
               {config.name}
             </h3>
@@ -190,6 +191,22 @@ function ConfigCard({ config }: { config: AiConfig }) {
         )}
       </div>
     </li>
+  );
+}
+
+function ModeBadge({ mode }: { mode: AiConfig["account_mode"] | undefined }) {
+  const m = mode === "fictional" ? "fictional" : "real";
+  if (m === "real") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-cyan/30 bg-cyan/10 px-2 py-0.5 font-mono text-[10px] tracking-wider text-cyan">
+        🏪 実在
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 font-mono text-[10px] tracking-wider text-accent">
+      🎭 架空
+    </span>
   );
 }
 

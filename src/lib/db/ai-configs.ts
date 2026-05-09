@@ -1,4 +1,5 @@
 import type {
+  AccountMode,
   AiConfig,
   AiConfigInsert,
   AiConfigUpdate,
@@ -7,16 +8,28 @@ import type { DBClient as DB } from "./_client-type";
 
 const TABLE = "ai_configs";
 
+export type ListAiConfigsOptions = {
+  /** Filter by account_mode. Omit for all modes. */
+  mode?: AccountMode;
+};
+
 export async function listAiConfigsByUser(
   supabase: DB,
   userId: string,
+  options: ListAiConfigsOptions = {},
 ): Promise<AiConfig[]> {
-  const { data, error } = await supabase
+  let query = supabase
     .from(TABLE)
     .select("*")
     .eq("user_id", userId)
     .order("is_default", { ascending: false })
     .order("updated_at", { ascending: false });
+
+  if (options.mode) {
+    query = query.eq("account_mode", options.mode);
+  }
+
+  const { data, error } = await query;
 
   if (error) throw error;
   return data ?? [];

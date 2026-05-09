@@ -47,6 +47,15 @@ export default async function ConfigDetailPage({
             AI設定一覧へ戻る
           </Link>
           <h1 className="mt-3 flex flex-wrap items-center gap-2 text-2xl font-extrabold tracking-tight text-ink">
+            {config.account_mode === "fictional" ? (
+              <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 font-mono text-[10px] tracking-widest text-accent">
+                🎭 架空モード
+              </span>
+            ) : (
+              <span className="rounded-full border border-cyan/30 bg-cyan/10 px-2 py-0.5 font-mono text-[10px] tracking-widest text-cyan">
+                🏪 実在モード
+              </span>
+            )}
             {config.name}
             {config.is_default && (
               <span className="rounded-full border border-cyan/30 bg-cyan/10 px-2 py-0.5 font-mono text-[10px] tracking-widest text-cyan">
@@ -83,6 +92,47 @@ export default async function ConfigDetailPage({
           value={config.requires_approval ? "承認制" : "完全自動"}
         />
       </Card>
+
+      {config.account_mode === "real" && (
+        <Card title="実在情報（捏造禁止モード）">
+          <Row label="営業時間" value={config.business_hours} />
+          <Row label="定休日" value={config.closed_days} />
+          <Row label="所在地" value={config.address} />
+          <Row label="価格帯" value={config.price_range} />
+          <Row
+            label="看板メニュー"
+            value={
+              (config.menu_items?.length ?? 0) > 0
+                ? config.menu_items.join(" / ")
+                : null
+            }
+          />
+          <Row
+            label="季節限定"
+            value={
+              (config.seasonal_items?.length ?? 0) > 0
+                ? config.seasonal_items.join(" / ")
+                : null
+            }
+          />
+          <Row
+            label="実話エピソード"
+            value={
+              (config.real_episodes?.length ?? 0) > 0
+                ? `${config.real_episodes.length}件登録`
+                : null
+            }
+          />
+          <Row
+            label="告知テーマ"
+            value={
+              (config.announcement_topics?.length ?? 0) > 0
+                ? config.announcement_topics.join(" / ")
+                : null
+            }
+          />
+        </Card>
+      )}
 
       <Card title="世界観">
         <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">

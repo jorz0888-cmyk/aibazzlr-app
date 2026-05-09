@@ -91,12 +91,62 @@ export function PromptPreview({
     }
   }
 
+  const mode = initialData.account_mode === "fictional" ? "fictional" : "real";
+
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center gap-2">
+        {mode === "real" ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-cyan/30 bg-cyan/10 px-3 py-1 font-mono text-[11px] tracking-widest text-cyan">
+            🏪 実在モード（捏造禁止）
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-3 py-1 font-mono text-[11px] tracking-widest text-accent">
+            🎭 架空モード（v14スタイル）
+          </span>
+        )}
+      </div>
+
       {initialData.summary_message && (
         <div className="card border-cyan/30 bg-cyan/5 p-5 text-sm leading-relaxed text-ink">
           💬 {initialData.summary_message}
         </div>
+      )}
+
+      {mode === "real" && (
+        <Section title="🏪 実在情報">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <ReadOnlyField
+              label="営業時間"
+              value={initialData.business_hours}
+            />
+            <ReadOnlyField
+              label="定休日"
+              value={initialData.closed_days}
+            />
+            <ReadOnlyField label="所在地" value={initialData.address} />
+            <ReadOnlyField
+              label="価格帯"
+              value={initialData.price_range}
+            />
+          </div>
+          <ReadOnlyList label="看板メニュー" items={initialData.menu_items} />
+          <ReadOnlyList
+            label="季節限定・日替わり"
+            items={initialData.seasonal_items}
+          />
+          <ReadOnlyList
+            label="実話エピソード"
+            items={initialData.real_episodes}
+          />
+          <ReadOnlyList
+            label="告知テーマ"
+            items={initialData.announcement_topics}
+          />
+          <p className="pt-2 text-[11px] text-ink-subtle">
+            実在情報は現状読み取り専用です。編集が必要な場合は「もう一度ヒアリング」してください。
+          </p>
+        </Section>
       )}
 
       <Section title="基本情報">
@@ -292,6 +342,56 @@ function Field({
         {required && <span className="ml-1 text-danger">*</span>}
       </div>
       {children}
+    </div>
+  );
+}
+
+function ReadOnlyField({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | null | undefined;
+}) {
+  return (
+    <div>
+      <div className="label">{label}</div>
+      <div className="rounded-lg border border-line bg-bg/40 px-3 py-2 text-sm text-ink">
+        {value || <span className="text-ink-subtle">—</span>}
+      </div>
+    </div>
+  );
+}
+
+function ReadOnlyList({
+  label,
+  items,
+}: {
+  label: string;
+  items: string[] | null | undefined;
+}) {
+  const list = (items ?? []).filter(Boolean);
+  return (
+    <div>
+      <div className="label">
+        {label} <span className="text-ink-subtle">({list.length})</span>
+      </div>
+      {list.length === 0 ? (
+        <div className="rounded-lg border border-line bg-bg/40 px-3 py-2 text-sm text-ink-subtle">
+          未登録
+        </div>
+      ) : (
+        <ul className="space-y-1">
+          {list.map((it, i) => (
+            <li
+              key={i}
+              className="rounded-lg border border-line bg-bg/40 px-3 py-2 text-sm text-ink"
+            >
+              {it}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
