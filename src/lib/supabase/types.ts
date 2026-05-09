@@ -49,7 +49,6 @@ export type SocialAccount = {
   platform: Platform;
   username: string;
   display_name: string | null;
-  avatar_url: string | null;
   // Encrypted token storage (AES-256-GCM ciphertext+iv+tag, base64)
   access_token: string | null;
   access_token_iv: string | null;

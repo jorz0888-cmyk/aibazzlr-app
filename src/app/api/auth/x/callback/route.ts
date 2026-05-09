@@ -101,7 +101,6 @@ export async function GET(request: NextRequest) {
       username: xUser.username,
       display_name: xUser.name,
       profile_image_url: xUser.profile_image_url ?? null,
-      avatar_url: xUser.profile_image_url ?? null, // back-compat field
 
       access_token: encAccess.ciphertext,
       access_token_iv: encAccess.iv,

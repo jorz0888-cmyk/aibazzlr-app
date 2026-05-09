@@ -83,12 +83,10 @@ export function SnsAccountCard({ account }: { account: SocialAccount }) {
   return (
     <li className="card flex flex-wrap items-center gap-4 p-5 transition hover:border-cyan/30">
       {/* Avatar */}
-      {account.profile_image_url ?? account.avatar_url ? (
+      {account.profile_image_url ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={
-            (account.profile_image_url ?? account.avatar_url) as string
-          }
+          src={account.profile_image_url}
           alt=""
           className="h-12 w-12 shrink-0 rounded-full border border-line object-cover"
         />
