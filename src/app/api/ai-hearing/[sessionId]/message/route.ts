@@ -17,6 +17,9 @@ import {
 import type { HearingMessage } from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
+// Allow long-running streamed responses (Claude completion + DB write +
+// optional finalize). Default Hobby cap is 10s; bump to 60s.
+export const maxDuration = 60;
 
 type Ctx = { params: Promise<{ sessionId: string }> };
 
@@ -54,17 +57,27 @@ export async function POST(request: NextRequest, { params }: Ctx) {
     created_at: new Date().toISOString(),
   };
   const messagesWithUser = [...session.messages, userMsg];
-  await updateHearingSession(supabase, sessionId, {
-    messages: messagesWithUser,
-  });
+  try {
+    await updateHearingSession(supabase, sessionId, {
+      messages: messagesWithUser,
+    });
+  } catch (e) {
+    console.error("[hearing/message] persist user msg failed", e);
+    return NextResponse.json(
+      { error: "メッセージの保存に失敗しました" },
+      { status: 500 },
+    );
+  }
 
   // Stream the interviewer's reply.
   const anthropic = getAnthropic();
-
   const encoder = new TextEncoder();
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let fullText = "";
+      let streamCompleted = false;
+
       try {
         const apiMessages = messagesWithUser.map((m) => ({
           role: m.role,
@@ -73,7 +86,7 @@ export async function POST(request: NextRequest, { params }: Ctx) {
 
         const aiStream = anthropic.messages.stream({
           model: HEARING_MODEL,
-          max_tokens: 1500,
+          max_tokens: 3000, // headroom for JSON output (~2k tokens)
           system: HEARING_INTERVIEWER_PROMPT,
           messages: apiMessages,
         });
@@ -85,18 +98,35 @@ export async function POST(request: NextRequest, { params }: Ctx) {
           ) {
             const piece = event.delta.text;
             fullText += piece;
-            controller.enqueue(encoder.encode(piece));
+            try {
+              controller.enqueue(encoder.encode(piece));
+            } catch {
+              // client disconnected; keep going so we can still persist
+            }
           }
         }
+        streamCompleted = true;
+      } catch (e) {
+        console.error("[hearing/message] anthropic stream error", e);
+        try {
+          controller.enqueue(
+            encoder.encode(
+              "\n\n[エラーが発生しました。少し待ってから再試行してください]",
+            ),
+          );
+        } catch {
+          /* noop */
+        }
+      }
 
-        // Persist the assistant message + maybe finalize.
-        const assistantMsg: HearingMessage = {
-          role: "assistant",
-          content: fullText,
-          created_at: new Date().toISOString(),
-        };
-        const finalMessages = [...messagesWithUser, assistantMsg];
+      // Always try to persist whatever was generated, even on partial failure.
+      const assistantMsg: HearingMessage = {
+        role: "assistant",
+        content: fullText || "(応答が生成されませんでした)",
+        created_at: new Date().toISOString(),
+      };
 
+      try {
         const extracted = tryExtractFinalJson(fullText);
         const visibleText = stripJsonFence(fullText);
 
@@ -115,27 +145,32 @@ export async function POST(request: NextRequest, { params }: Ctx) {
           });
         } else {
           await updateHearingSession(supabase, sessionId, {
-            messages: finalMessages,
+            messages: [...messagesWithUser, assistantMsg],
             current_step: Math.min(
               session.current_step + 1,
               TOTAL_HEARING_STEPS,
             ),
           });
         }
-
-        controller.close();
       } catch (e) {
-        console.error("[hearing/message] stream error", e);
+        console.error("[hearing/message] post-stream save failed", e);
+        // Best effort: try to at least record the assistant message.
         try {
-          controller.enqueue(
-            encoder.encode(
-              "\n\n[エラーが発生しました。少し待ってから再試行してください]",
-            ),
-          );
+          await updateHearingSession(supabase, sessionId, {
+            messages: [...messagesWithUser, assistantMsg],
+          });
         } catch {
-          /* noop */
+          /* give up */
+        }
+      }
+
+      try {
+        if (!streamCompleted) {
+          controller.enqueue(encoder.encode(""));
         }
         controller.close();
+      } catch {
+        /* already closed */
       }
     },
   });

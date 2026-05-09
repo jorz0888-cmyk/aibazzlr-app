@@ -74,58 +74,58 @@ ${hashtagBlock}
 - 投稿文に分析の中身や手順を含めない`;
 }
 
+// ----------------------------------------------------------------------------
+// JSON extraction
+// ----------------------------------------------------------------------------
+
 /**
- * Best-effort JSON extraction from an interviewer message.
- * Returns the parsed object if a fenced JSON block with `complete: true`
- * is found, otherwise null.
+ * Robust extractor for the interviewer's final structured output.
+ *
+ * Handles, in order:
+ *   1. Fenced ```json ... ``` blocks
+ *   2. Fenced ``` ... ``` (no language tag) that look like JSON
+ *   3. Bare {...} containing "complete": ...
+ *   4. Trailing-truncation: balanced-brace recovery from a partial response
+ *
+ * Returns null only if no plausible JSON object is found.
  */
 export function tryExtractFinalJson(
   text: string,
 ): ExtractedHearingData | null {
-  // First try fenced ```json ... ```
-  const fenceMatch = text.match(/```json\s*([\s\S]*?)```/i);
-  if (fenceMatch) {
-    try {
-      const parsed = JSON.parse(fenceMatch[1].trim());
-      if (parsed && typeof parsed === "object" && parsed.complete === true) {
-        return parsed as ExtractedHearingData;
-      }
-    } catch {
-      /* fall through */
+  if (!text) return null;
+
+  const candidates: string[] = [];
+
+  // 1. ```json ... ```
+  const fencedJson = [...text.matchAll(/```json\s*([\s\S]*?)```/gi)];
+  for (const m of fencedJson) candidates.push(m[1]);
+
+  // 2. ``` ... ``` without language tag, but only if content starts with {
+  const fencedAny = [...text.matchAll(/```\s*([\s\S]*?)```/g)];
+  for (const m of fencedAny) {
+    const inner = m[1].trim();
+    if (inner.startsWith("{")) candidates.push(inner);
+  }
+
+  // 3. Bare object containing "complete":
+  const bare = sliceBalancedObjectAround(text, /"complete"\s*:/);
+  if (bare) candidates.push(bare);
+
+  // 4. Try each candidate (most specific first)
+  for (const raw of candidates) {
+    const parsed = safeJsonParse(raw);
+    if (parsed && parsed.complete === true) return parsed;
+  }
+
+  // 5. Last resort: any candidate that has the right shape, even without
+  //    `complete: true` (for cases where Claude forgot the flag)
+  for (const raw of candidates) {
+    const parsed = safeJsonParse(raw);
+    if (parsed && (parsed.business_name || parsed.world_view)) {
+      return { complete: true, ...parsed };
     }
   }
 
-  // Fallback: locate the last balanced JSON object containing "complete":
-  const idx = text.search(/"complete"\s*:/);
-  if (idx === -1) return null;
-
-  // Find the surrounding {...}
-  let start = idx;
-  while (start >= 0 && text[start] !== "{") start--;
-  if (start < 0) return null;
-
-  let depth = 0;
-  let end = -1;
-  for (let i = start; i < text.length; i++) {
-    if (text[i] === "{") depth++;
-    else if (text[i] === "}") {
-      depth--;
-      if (depth === 0) {
-        end = i;
-        break;
-      }
-    }
-  }
-  if (end === -1) return null;
-
-  try {
-    const parsed = JSON.parse(text.slice(start, end + 1));
-    if (parsed && typeof parsed === "object" && parsed.complete === true) {
-      return parsed as ExtractedHearingData;
-    }
-  } catch {
-    /* ignore */
-  }
   return null;
 }
 
@@ -134,5 +134,129 @@ export function tryExtractFinalJson(
  * conversational text.
  */
 export function stripJsonFence(text: string): string {
-  return text.replace(/```json\s*[\s\S]*?```/i, "").trim();
+  return text
+    .replace(/```json\s*[\s\S]*?```/gi, "")
+    .replace(/```\s*\{[\s\S]*?\}\s*```/g, "")
+    .trim();
+}
+
+// ----- internals -----------------------------------------------------------
+
+function safeJsonParse(input: string): (ExtractedHearingData & {
+  complete?: boolean;
+}) | null {
+  const cleaned = cleanupJsonString(input);
+
+  // First attempt: direct parse
+  try {
+    const obj = JSON.parse(cleaned);
+    if (obj && typeof obj === "object") return obj;
+  } catch {
+    /* fall through */
+  }
+
+  // Second attempt: strip trailing comma errors and try again
+  try {
+    const fixed = cleaned.replace(/,(\s*[}\]])/g, "$1");
+    const obj = JSON.parse(fixed);
+    if (obj && typeof obj === "object") return obj;
+  } catch {
+    /* fall through */
+  }
+
+  // Third attempt: truncated JSON — find last balanced brace
+  const truncated = recoverTruncatedJson(cleaned);
+  if (truncated) {
+    try {
+      const obj = JSON.parse(truncated);
+      if (obj && typeof obj === "object") return obj;
+    } catch {
+      /* give up */
+    }
+  }
+
+  return null;
+}
+
+function cleanupJsonString(s: string): string {
+  // Remove leading/trailing prose and code fences.
+  let out = s.trim();
+  out = out.replace(/^```(?:json)?\s*/i, "");
+  out = out.replace(/```\s*$/i, "");
+  // Some models emit smart quotes; normalize a few.
+  out = out
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'");
+  return out.trim();
+}
+
+function recoverTruncatedJson(s: string): string | null {
+  const start = s.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let lastBalanced = -1;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (c === "\\") {
+      escape = true;
+      continue;
+    }
+    if (c === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth === 0) lastBalanced = i;
+    }
+  }
+  if (lastBalanced > start) {
+    return s.slice(start, lastBalanced + 1);
+  }
+  return null;
+}
+
+function sliceBalancedObjectAround(
+  text: string,
+  marker: RegExp,
+): string | null {
+  const m = marker.exec(text);
+  if (!m) return null;
+  let start = m.index;
+  while (start >= 0 && text[start] !== "{") start--;
+  if (start < 0) return null;
+  // Try to find a balanced closing brace after the marker.
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (c === "\\") {
+      escape = true;
+      continue;
+    }
+    if (c === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
 }
