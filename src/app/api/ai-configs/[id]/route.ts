@@ -7,8 +7,26 @@ import {
   updateAiConfig,
 } from "@/lib/db/ai-configs";
 import { toStringArray } from "@/lib/ai/normalize-extracted";
+import {
+  AI_CONFIG_DEFAULTS,
+  applyAiConfigDefaults,
+} from "@/lib/db/ai-config-defaults";
 import { extractDbError } from "@/lib/db/error";
 import type { AiConfigUpdate } from "@/lib/supabase/types";
+
+// Columns that are NOT NULL in production but lack DB-side defaults. If the
+// caller sends `null` (e.g. the user cleared the input), substitute the safe
+// default rather than letting Postgres reject the UPDATE.
+const NOT_NULL_FIELDS = new Set<keyof AiConfigUpdate>([
+  "posting_frequency",
+  "posting_times",
+  "social_account_ids",
+  "requires_approval",
+  "status",
+  "is_default",
+  "hashtags_per_post",
+  "account_mode",
+]);
 
 const ARRAY_FIELDS = new Set<keyof AiConfigUpdate>([
   "ng_words",
@@ -85,8 +103,18 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
   for (const key of passthrough) {
     if (key in body) {
       const raw = body[key];
-      // Normalize array fields so {name, price} objects don't reach Postgres.
-      const value = ARRAY_FIELDS.has(key) ? toStringArray(raw) : raw;
+      // 1) Array fields: coerce to string[] so objects like {name,price} are
+      //    rendered into "name（price）" strings (avoids text[] type errors).
+      // 2) NOT NULL fields: if caller sent null/undefined, fall back to the
+      //    safe default rather than letting Postgres reject the UPDATE.
+      let value: unknown = ARRAY_FIELDS.has(key) ? toStringArray(raw) : raw;
+      if (
+        NOT_NULL_FIELDS.has(key) &&
+        (value === null || value === undefined)
+      ) {
+        value =
+          AI_CONFIG_DEFAULTS[key as keyof typeof AI_CONFIG_DEFAULTS];
+      }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (patch as any)[key] = value;
     }

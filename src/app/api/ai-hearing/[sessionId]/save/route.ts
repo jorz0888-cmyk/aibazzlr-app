@@ -5,6 +5,7 @@ import {
   updateHearingSession,
 } from "@/lib/db/ai-hearing-sessions";
 import { createAiConfig, setDefaultAiConfig } from "@/lib/db/ai-configs";
+import { applyAiConfigDefaults } from "@/lib/db/ai-config-defaults";
 import { extractDbError } from "@/lib/db/error";
 import {
   normalizeExtractedData,
@@ -97,11 +98,12 @@ export async function POST(request: NextRequest, { params }: Ctx) {
   const ensureArray = (v: unknown): string[] =>
     Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 
-  const insert: AiConfigInsert = {
+  // Build the raw payload; pass through applyAiConfigDefaults so any field
+  // that's NOT NULL in production (posting_frequency, posting_times, etc.)
+  // gets a safe default if upstream code didn't supply one.
+  const insert: AiConfigInsert = applyAiConfigDefaults({
     user_id: userId, // ← strictly from verified server session
     name: body.name?.trim() || data.business_name?.trim() || "新しいAI設定",
-    is_default: false,
-    status: "active",
     account_mode: accountMode,
     industry: data.industry ?? session.industry ?? null,
     business_name: data.business_name ?? null,
@@ -115,12 +117,7 @@ export async function POST(request: NextRequest, { params }: Ctx) {
     good_examples: toStringArray(data.good_examples),
     bad_examples: [],
     hashtag_pool: toStringArray(data.hashtag_pool),
-    hashtags_per_post: 3,
-    posting_frequency: null,
-    posting_times: null,
-    social_account_ids: [],
     generated_system_prompt: finalizedPrompt,
-    requires_approval: true,
     // Real-mode-only fields (safe to send for fictional too — DB defaults to '' / [])
     business_hours: data.business_hours ?? null,
     closed_days: data.closed_days ?? null,
@@ -130,7 +127,10 @@ export async function POST(request: NextRequest, { params }: Ctx) {
     seasonal_items: toStringArray(data.seasonal_items),
     real_episodes: toStringArray(data.real_episodes),
     announcement_topics: toStringArray(data.announcement_topics),
-  };
+    // is_default / status / posting_frequency / posting_times /
+    // social_account_ids / requires_approval / hashtags_per_post are all
+    // filled in by applyAiConfigDefaults when missing.
+  });
 
   let configId: string;
   try {
