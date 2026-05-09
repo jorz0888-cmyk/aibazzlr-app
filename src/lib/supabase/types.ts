@@ -50,15 +50,36 @@ export type SocialAccount = {
   username: string;
   display_name: string | null;
   avatar_url: string | null;
+  // Encrypted token storage (AES-256-GCM ciphertext+iv+tag, base64)
   access_token: string | null;
+  access_token_iv: string | null;
+  access_token_tag: string | null;
   refresh_token: string | null;
+  refresh_token_iv: string | null;
+  refresh_token_tag: string | null;
   token_expires_at: string | null;
+  scopes: string[] | null;
+  token_type: string | null;
+  platform_user_id: string | null;
+  profile_image_url: string | null;
   status: SocialAccountStatus;
   is_primary: boolean;
   connected_at: string;
   last_synced_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+// ---- OAuth sessions (Phase 6 — PKCE intermediate state) ------------------
+export type OauthSession = {
+  id: string;
+  user_id: string;
+  platform: Platform;
+  state: string;
+  code_verifier: string;
+  redirect_after: string | null;
+  expires_at: string;
+  created_at: string;
 };
 
 /** Free-form text values stored in ai_configs.status / posting_frequency. */
@@ -226,6 +247,15 @@ export type PromptTemplateUpdate = Updatable<PromptTemplate>;
 export type AiHearingSessionInsert = Insertable<AiHearingSession>;
 export type AiHearingSessionUpdate = Updatable<AiHearingSession>;
 
+export type OauthSessionInsert = Partial<
+  Omit<OauthSession, "created_at" | "expires_at">
+> & {
+  expires_at?: string;
+};
+export type OauthSessionUpdate = Partial<
+  Omit<OauthSession, "id" | "user_id" | "created_at">
+>;
+
 // ---- Database (for typed Supabase client) -------------------------------
 export type Database = {
   public: {
@@ -264,6 +294,12 @@ export type Database = {
         Row: AiHearingSession;
         Insert: AiHearingSessionInsert;
         Update: AiHearingSessionUpdate;
+        Relationships: [];
+      };
+      oauth_sessions: {
+        Row: OauthSession;
+        Insert: OauthSessionInsert;
+        Update: OauthSessionUpdate;
         Relationships: [];
       };
     };

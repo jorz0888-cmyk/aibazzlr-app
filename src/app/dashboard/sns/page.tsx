@@ -1,31 +1,11 @@
+import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { listSocialAccountsByUser } from "@/lib/db/social-accounts";
-import type { Platform, SocialAccount } from "@/lib/supabase/types";
+import { XConnectButton } from "@/components/sns/XConnectButton";
+import { SnsAccountCard } from "@/components/sns/SnsAccountCard";
+import { SnsToast } from "./SnsToast";
 
 export const dynamic = "force-dynamic";
-
-const platformMeta: Record<Platform, { label: string; bg: string }> = {
-  x: { label: "X", bg: "bg-black border border-white/20" },
-  threads: { label: "Threads", bg: "bg-black border border-white/20" },
-  instagram: {
-    label: "Instagram",
-    bg: "bg-gradient-to-br from-[#f09433] via-[#dc2743] to-[#bc1888]",
-  },
-};
-
-const statusLabel: Record<SocialAccount["status"], string> = {
-  active: "稼働中",
-  expired: "トークン期限切れ",
-  disconnected: "切断済み",
-  error: "エラー",
-};
-
-const statusColor: Record<SocialAccount["status"], string> = {
-  active: "text-success",
-  expired: "text-yellow-400",
-  disconnected: "text-ink-muted",
-  error: "text-danger",
-};
 
 export default async function SnsPage() {
   const supabase = await createClient();
@@ -35,6 +15,7 @@ export default async function SnsPage() {
   if (!user) return null;
 
   const accounts = await listSocialAccountsByUser(supabase, user.id);
+  const xAccounts = accounts.filter((a) => a.platform === "x");
 
   return (
     <div className="space-y-8">
@@ -46,93 +27,108 @@ export default async function SnsPage() {
           SNS連携
         </h1>
         <p className="mt-2 text-sm text-ink-muted">
-          X・Threads・InstagramをAIBazzlrに接続して、自動投稿を有効化します。
+          AIBazzlrからの自動投稿を有効化するため、SNSアカウントを連携してください。
         </p>
       </div>
 
-      <div className="flex justify-end">
-        <button type="button" className="btn-primary" disabled>
-          + 新規連携を追加
-        </button>
-      </div>
+      <Suspense fallback={null}>
+        <SnsToast />
+      </Suspense>
 
-      {accounts.length === 0 ? (
-        <EmptyState />
-      ) : (
-        <ul className="grid gap-3">
-          {accounts.map((a) => {
-            const meta = platformMeta[a.platform];
-            return (
-              <li
-                key={a.id}
-                className="card flex items-center gap-4 p-5 transition hover:border-cyan/30"
-              >
-                <div
-                  className={[
-                    "grid h-12 w-12 shrink-0 place-items-center rounded-xl text-base font-bold text-white",
-                    meta.bg,
-                  ].join(" ")}
-                  aria-hidden
-                >
-                  {meta.label[0]}
-                </div>
+      {/* Available platforms */}
+      <section className="space-y-3">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-ink-muted">
+          連携可能なSNS
+        </h2>
 
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-ink">
-                      @{a.username}
-                    </span>
-                    {a.is_primary && (
-                      <span className="rounded-full border border-cyan/30 bg-cyan/10 px-2 py-0.5 font-mono text-[9px] tracking-wider text-cyan">
-                        PRIMARY
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-0.5 text-xs text-ink-muted">
-                    {meta.label}
-                    {a.display_name && ` · ${a.display_name}`}
-                  </div>
-                </div>
+        <div className="grid gap-3 lg:grid-cols-3">
+          <PlatformCard
+            label="X (Twitter)"
+            description="OAuth 2.0でAPIに直接連携。tweet.write権限で投稿可能。"
+            available
+            badge={`${xAccounts.length} 件接続中`}
+          >
+            <XConnectButton />
+          </PlatformCard>
 
-                <div className="hidden text-right sm:block">
-                  <div
-                    className={`text-xs font-semibold ${statusColor[a.status]}`}
-                  >
-                    ● {statusLabel[a.status]}
-                  </div>
-                  <div className="mt-0.5 font-mono text-[10px] text-ink-subtle">
-                    {new Date(a.connected_at).toLocaleDateString("ja-JP")}〜
-                  </div>
-                </div>
+          <PlatformCard
+            label="Threads"
+            description="Threads APIに対応次第リリース予定。"
+            available={false}
+          />
+          <PlatformCard
+            label="Instagram"
+            description="Instagram Graph APIに対応次第リリース予定。"
+            available={false}
+          />
+        </div>
+      </section>
 
-                <button type="button" className="btn-ghost" disabled>
-                  管理
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+      {/* Connected accounts */}
+      <section className="space-y-3">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-ink-muted">
+          連携済みアカウント ({accounts.length})
+        </h2>
+
+        {accounts.length === 0 ? (
+          <div className="card grid place-items-center px-6 py-16 text-center">
+            <div className="text-4xl">🔗</div>
+            <h3 className="mt-3 text-base font-bold text-ink">
+              まだ連携されたSNSはありません
+            </h3>
+            <p className="mt-2 max-w-sm text-sm text-ink-muted">
+              上の「X (Twitter) を連携」ボタンから OAuth 認証を開始してください。
+              認証後、AIBazzlr から自動で投稿できるようになります。
+            </p>
+          </div>
+        ) : (
+          <ul className="grid gap-3">
+            {accounts.map((a) => (
+              <SnsAccountCard key={a.id} account={a} />
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }
 
-function EmptyState() {
+function PlatformCard({
+  label,
+  description,
+  available,
+  badge,
+  children,
+}: {
+  label: string;
+  description: string;
+  available: boolean;
+  badge?: string;
+  children?: React.ReactNode;
+}) {
   return (
-    <div className="card grid place-items-center px-6 py-16 text-center">
-      <div className="text-4xl">🔗</div>
-      <h2 className="mt-3 text-base font-bold text-ink">
-        まだSNSが連携されていません
-      </h2>
-      <p className="mt-2 max-w-sm text-sm text-ink-muted">
-        X・Threads・Instagramを連携すると、AIによる自動投稿が利用可能になります。
-      </p>
-      <button type="button" className="btn-primary mt-6" disabled>
-        最初のアカウントを連携する
-      </button>
-      <span className="mt-3 font-mono text-[10px] tracking-widest text-ink-subtle">
-        OAUTH連携機能は実装準備中
-      </span>
+    <div
+      className={[
+        "card flex flex-col gap-3 p-5 transition",
+        available ? "hover:border-cyan/30" : "opacity-60",
+      ].join(" ")}
+    >
+      <div className="flex items-center gap-2">
+        <h3 className="text-base font-bold text-ink">{label}</h3>
+        {available ? (
+          badge && (
+            <span className="rounded-full border border-cyan/30 bg-cyan/10 px-2 py-0.5 font-mono text-[9px] tracking-widest text-cyan">
+              {badge}
+            </span>
+          )
+        ) : (
+          <span className="rounded-full border border-line-strong bg-white/5 px-2 py-0.5 font-mono text-[9px] tracking-widest text-ink-subtle">
+            COMING SOON
+          </span>
+        )}
+      </div>
+      <p className="text-xs leading-relaxed text-ink-muted">{description}</p>
+      <div className="mt-auto pt-2">{children}</div>
     </div>
   );
 }
