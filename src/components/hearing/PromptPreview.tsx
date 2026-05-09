@@ -74,7 +74,7 @@ export function PromptPreview({
               .split(/\s+/)
               .map((t) => t.trim())
               .filter(Boolean),
-            finalized_prompt: prompt,
+            generated_system_prompt: prompt,
           },
         }),
       });

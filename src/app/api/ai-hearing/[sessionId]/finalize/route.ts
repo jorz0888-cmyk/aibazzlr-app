@@ -44,13 +44,91 @@ const FINALIZE_INSTRUCTION = `ここまでの会話を踏まえて、システ�
 }
 \`\`\``;
 
+function describeDbError(e: unknown): string {
+  if (e && typeof e === "object") {
+    const obj = e as {
+      message?: unknown;
+      code?: unknown;
+      details?: unknown;
+      hint?: unknown;
+    };
+    const parts: string[] = [];
+    if (typeof obj.code === "string" && obj.code) parts.push(`[${obj.code}]`);
+    if (typeof obj.message === "string" && obj.message) parts.push(obj.message);
+    if (typeof obj.details === "string" && obj.details) parts.push(obj.details);
+    if (typeof obj.hint === "string" && obj.hint)
+      parts.push(`hint: ${obj.hint}`);
+    if (parts.length > 0) return parts.join(" ");
+  }
+  if (e instanceof Error) return e.message;
+  return "詳細不明のエラー";
+}
+
 /**
- * POST /api/ai-hearing/[sessionId]/finalize
- *
- * If the conversation didn't naturally end with the JSON block (e.g. user
- * cut it short, or the model emitted malformed JSON), re-prompt with strict
- * formatting rules. Returns the extracted data plus the v14 system prompt.
+ * Save finalized result to ai_hearing_sessions. Tries the full payload first,
+ * then progressively trims optional columns if Postgres complains they don't
+ * exist. Returns null on success or an error description on failure.
  */
+async function tryUpdate(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  sessionId: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  patch: Record<string, any>,
+): Promise<{ code: string | null; message: string } | null> {
+  const { error } = await supabase
+    .from("ai_hearing_sessions")
+    // Cast: we manage column existence at runtime via 42703 fallback below.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .update(patch as any)
+    .eq("id", sessionId);
+  if (!error) return null;
+  return {
+    code: (error as { code?: string }).code ?? null,
+    message: describeDbError(error),
+  };
+}
+
+async function saveFinalized(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  sessionId: string,
+  extracted: ExtractedHearingData,
+  prompt: string,
+): Promise<{ ok: true } | { ok: false; error: string; code: string | null }> {
+  // Attempt 1: full payload
+  const e1 = await tryUpdate(supabase, sessionId, {
+    extracted_data: extracted,
+    generated_system_prompt: prompt,
+    status: "completed",
+    generated_at: new Date().toISOString(),
+  });
+  if (!e1) return { ok: true };
+  console.error("[finalize] save attempt 1 (full) failed", e1);
+
+  // Attempt 2: drop generated_at if column doesn't exist
+  if (e1.code === "42703") {
+    const e2 = await tryUpdate(supabase, sessionId, {
+      extracted_data: extracted,
+      generated_system_prompt: prompt,
+      status: "completed",
+    });
+    if (!e2) return { ok: true };
+    console.error("[finalize] save attempt 2 (no generated_at) failed", e2);
+
+    // Attempt 3: minimal (only status). At least the chat won't loop.
+    if (e2.code === "42703") {
+      const e3 = await tryUpdate(supabase, sessionId, {
+        status: "completed",
+      });
+      if (!e3) return { ok: true };
+      console.error("[finalize] save attempt 3 (status only) failed", e3);
+      return { ok: false, error: e3.message, code: e3.code };
+    }
+    return { ok: false, error: e2.message, code: e2.code };
+  }
+
+  return { ok: false, error: e1.message, code: e1.code };
+}
+
 export async function POST(_request: NextRequest, { params }: Ctx) {
   const { sessionId } = await params;
   const supabase = await createClient();
@@ -67,10 +145,10 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
   }
 
   // Already finalized — return cached.
-  if (session.extracted_data && session.finalized_prompt) {
+  if (session.extracted_data && session.generated_system_prompt) {
     return NextResponse.json({
       extracted: session.extracted_data,
-      prompt: session.finalized_prompt,
+      prompt: session.generated_system_prompt,
       cached: true,
     });
   }
@@ -84,15 +162,22 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
     const extracted = tryExtractFinalJson(lastAssistant.content);
     if (extracted) {
       const prompt = buildV14SystemPrompt(extracted);
-      try {
-        await updateHearingSession(supabase, sessionId, {
-          extracted_data: extracted,
-          finalized_prompt: prompt,
-          status: "completed",
-          completed_at: new Date().toISOString(),
-        });
-      } catch (e) {
-        console.error("[finalize] save (last-msg path) failed", e);
+      const saveRes = await saveFinalized(
+        supabase,
+        sessionId,
+        extracted,
+        prompt,
+      );
+      if (!saveRes.ok) {
+        return NextResponse.json(
+          {
+            error: `保存に失敗しました: ${saveRes.error}`,
+            extracted,
+            prompt,
+            debug: { code: saveRes.code },
+          },
+          { status: 500 },
+        );
       }
       return NextResponse.json({ extracted, prompt, source: "last_message" });
     }
@@ -147,17 +232,17 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
 
   const prompt = buildV14SystemPrompt(extracted);
 
-  try {
-    await updateHearingSession(supabase, sessionId, {
-      extracted_data: extracted,
-      finalized_prompt: prompt,
-      status: "completed",
-      completed_at: new Date().toISOString(),
-    });
-  } catch (e) {
-    console.error("[hearing/finalize] save failed", e);
+  const saveRes = await saveFinalized(supabase, sessionId, extracted, prompt);
+  if (!saveRes.ok) {
     return NextResponse.json(
-      { error: "保存に失敗しました（プロンプト生成は成功）" },
+      {
+        // Pass extracted+prompt so the client can still show preview even if
+        // we couldn't persist it.
+        error: `保存に失敗しました: ${saveRes.error}`,
+        extracted,
+        prompt,
+        debug: { code: saveRes.code },
+      },
       { status: 500 },
     );
   }

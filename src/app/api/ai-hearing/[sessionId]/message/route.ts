@@ -131,18 +131,39 @@ export async function POST(request: NextRequest, { params }: Ctx) {
         const visibleText = stripJsonFence(fullText);
 
         if (extracted) {
-          const finalizedPrompt = buildV14SystemPrompt(extracted);
-          await updateHearingSession(supabase, sessionId, {
+          const generatedPrompt = buildV14SystemPrompt(extracted);
+          // Try the full update; if a column doesn't exist (42703), fall
+          // back to the minimal set so we at least flip the status.
+          const fullPatch = {
             messages: [
               ...messagesWithUser,
               { ...assistantMsg, content: visibleText || fullText },
             ],
             extracted_data: extracted,
-            finalized_prompt: finalizedPrompt,
-            status: "completed",
-            completed_at: new Date().toISOString(),
+            generated_system_prompt: generatedPrompt,
+            status: "completed" as const,
+            generated_at: new Date().toISOString(),
             current_step: TOTAL_HEARING_STEPS,
-          });
+          };
+          try {
+            await updateHearingSession(supabase, sessionId, fullPatch);
+          } catch (firstErr) {
+            const code = (firstErr as { code?: string })?.code;
+            console.warn(
+              "[hearing/message] full patch failed; retrying minimal",
+              { code, firstErr },
+            );
+            await updateHearingSession(supabase, sessionId, {
+              messages: [
+                ...messagesWithUser,
+                { ...assistantMsg, content: visibleText || fullText },
+              ],
+              extracted_data: extracted,
+              generated_system_prompt: generatedPrompt,
+              status: "completed" as const,
+              current_step: TOTAL_HEARING_STEPS,
+            });
+          }
         } else {
           await updateHearingSession(supabase, sessionId, {
             messages: [...messagesWithUser, assistantMsg],

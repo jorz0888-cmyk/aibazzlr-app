@@ -116,7 +116,7 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
   if (!session || session.user_id !== user.id) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  if (!session.finalized_prompt) {
+  if (!session.generated_system_prompt) {
     return NextResponse.json(
       {
         error:
@@ -133,7 +133,7 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
     resp = await anthropic.messages.create({
       model: HEARING_MODEL,
       max_tokens: 1500,
-      system: session.finalized_prompt,
+      system: session.generated_system_prompt,
       messages: [{ role: "user", content: buildUserPrompt() }],
     });
   } catch (e) {

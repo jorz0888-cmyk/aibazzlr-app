@@ -20,7 +20,7 @@ export default async function HearingPreviewPage({
   const session = await getHearingSession(supabase, sessionId);
   if (!session || session.user_id !== user.id) notFound();
 
-  if (!session.extracted_data || !session.finalized_prompt) {
+  if (!session.extracted_data || !session.generated_system_prompt) {
     redirect(`/dashboard/settings/ai/new/hearing/${sessionId}`);
   }
 
@@ -42,7 +42,7 @@ export default async function HearingPreviewPage({
       <PromptPreview
         sessionId={session.id}
         initialData={session.extracted_data}
-        initialPrompt={session.finalized_prompt}
+        initialPrompt={session.generated_system_prompt}
       />
     </div>
   );

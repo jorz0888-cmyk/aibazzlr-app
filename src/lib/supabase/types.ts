@@ -153,11 +153,11 @@ export type AiHearingSession = {
   industry: string | null;
   messages: HearingMessage[];
   extracted_data: ExtractedHearingData | null;
-  finalized_prompt: string | null;
+  generated_system_prompt: string | null;
   current_step: number;
   ai_config_id: string | null;
   started_at: string;
-  completed_at: string | null;
+  generated_at: string | null;
   created_at: string;
   updated_at: string;
 };

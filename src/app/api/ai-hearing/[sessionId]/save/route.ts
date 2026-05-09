@@ -15,6 +15,9 @@ type SaveBody = {
   name?: string;
   is_default?: boolean;
   prompt_overrides?: Partial<ExtractedHearingData> & {
+    /** Renamed from `finalized_prompt` to match production DB schema. */
+    generated_system_prompt?: string;
+    /** @deprecated Old client name; still accepted for back-compat. */
     finalized_prompt?: string;
   };
 };
@@ -39,7 +42,7 @@ export async function POST(request: NextRequest, { params }: Ctx) {
   if (!session || session.user_id !== user.id) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  if (!session.extracted_data || !session.finalized_prompt) {
+  if (!session.extracted_data || !session.generated_system_prompt) {
     return NextResponse.json(
       { error: "Session is not finalized yet" },
       { status: 409 },
@@ -55,7 +58,9 @@ export async function POST(request: NextRequest, { params }: Ctx) {
   };
 
   const finalizedPrompt =
-    body.prompt_overrides?.finalized_prompt ?? session.finalized_prompt;
+    body.prompt_overrides?.generated_system_prompt ??
+    body.prompt_overrides?.finalized_prompt ??
+    session.generated_system_prompt;
 
   const insert: AiConfigInsert = {
     user_id: user.id,
