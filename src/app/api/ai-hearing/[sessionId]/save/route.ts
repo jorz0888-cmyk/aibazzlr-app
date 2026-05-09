@@ -5,6 +5,7 @@ import {
   updateHearingSession,
 } from "@/lib/db/ai-hearing-sessions";
 import { createAiConfig, setDefaultAiConfig } from "@/lib/db/ai-configs";
+import { extractDbError } from "@/lib/db/error";
 import {
   normalizeExtractedData,
   toStringArray,
@@ -41,13 +42,25 @@ export async function POST(request: NextRequest, { params }: Ctx) {
   const supabase = await createClient();
   const {
     data: { user },
+    error: authError,
   } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (authError || !user || !user.id) {
+    console.error("[hearing/save] auth missing", { authError });
+    return NextResponse.json(
+      {
+        error:
+          "認証セッションを取得できませんでした。再度ログインしてからお試しください。",
+      },
+      { status: 401 },
+    );
   }
 
+  // user_id is taken strictly from the verified server-side session, never
+  // from the request body. Used unconditionally below.
+  const userId = user.id;
+
   const session = await getHearingSession(supabase, sessionId);
-  if (!session || session.user_id !== user.id) {
+  if (!session || session.user_id !== userId) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
   if (!session.extracted_data || !session.generated_system_prompt) {
@@ -85,7 +98,7 @@ export async function POST(request: NextRequest, { params }: Ctx) {
     Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 
   const insert: AiConfigInsert = {
-    user_id: user.id,
+    user_id: userId, // ← strictly from verified server session
     name: body.name?.trim() || data.business_name?.trim() || "新しいAI設定",
     is_default: false,
     status: "active",
@@ -121,11 +134,18 @@ export async function POST(request: NextRequest, { params }: Ctx) {
 
   let configId: string;
   try {
+    // Defensive: blow up loudly here if user_id slipped through. Better than
+    // a Postgres NOT NULL error that surfaces as "[object Object]".
+    if (!insert.user_id) {
+      throw new Error(
+        "Internal: insert.user_id is missing despite an authorized session",
+      );
+    }
     const config = await createAiConfig(supabase, insert);
     configId = config.id;
 
     if (body.is_default) {
-      await setDefaultAiConfig(supabase, config.id, user.id);
+      await setDefaultAiConfig(supabase, config.id, userId);
     }
 
     await updateHearingSession(supabase, sessionId, {
@@ -133,17 +153,19 @@ export async function POST(request: NextRequest, { params }: Ctx) {
       status: "completed",
     });
   } catch (e) {
-    const code = (e as { code?: string }).code ?? null;
-    const message = e instanceof Error ? e.message : String(e);
-    const hint = (e as { hint?: string }).hint ?? null;
-    const details = (e as { details?: string }).details ?? null;
+    const info = extractDbError(e);
     console.error("[AI-CONFIGS-SAVE-FAILURE]", {
       sessionId,
-      userId: user.id,
-      code,
-      message,
-      hint,
-      details,
+      userId,
+      errorCode: info.code,
+      errorMessage: info.message,
+      errorDetails: info.details,
+      errorHint: info.hint,
+      insertedFields: Object.keys(insert),
+      nullFields: Object.entries(insert)
+        .filter(([, v]) => v === null || v === undefined)
+        .map(([k]) => k),
+      userIdProvided: !!insert.user_id,
       arrayFieldsRaw: {
         menu_items_type: typeof (data.menu_items?.[0] as unknown),
         menu_items_sample: data.menu_items?.[0],
@@ -159,7 +181,7 @@ export async function POST(request: NextRequest, { params }: Ctx) {
     return NextResponse.json(
       {
         error: "AI設定の保存に失敗しました",
-        debug_save: { code, message, hint, details },
+        debug_save: info,
       },
       { status: 500 },
     );

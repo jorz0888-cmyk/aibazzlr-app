@@ -97,7 +97,7 @@ export function PromptPreview({
       router.push(`/dashboard/settings/ai/${aiConfigId}`);
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "保存に失敗しました");
+      setError(safeErrorMessage(e, "保存に失敗しました"));
       setSaving(false);
     }
   }
@@ -370,6 +370,28 @@ function Field({
       {children}
     </div>
   );
+}
+
+/**
+ * Defensively extract a string from arbitrary thrown values so we never show
+ * "[object Object]" in the UI.
+ */
+function safeErrorMessage(e: unknown, fallback: string): string {
+  if (typeof e === "string") return e;
+  if (e && typeof e === "object") {
+    const m = (e as { message?: unknown }).message;
+    if (typeof m === "string" && m) return m;
+    if (m && typeof m === "object") {
+      const inner = (m as { message?: unknown }).message;
+      if (typeof inner === "string" && inner) return inner;
+    }
+    try {
+      return JSON.stringify(e);
+    } catch {
+      /* noop */
+    }
+  }
+  return fallback;
 }
 
 function ReadOnlyField({

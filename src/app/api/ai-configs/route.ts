@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAiConfig, setDefaultAiConfig } from "@/lib/db/ai-configs";
+import { extractDbError } from "@/lib/db/error";
 import type { AiConfigInsert } from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
@@ -63,15 +64,23 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ id: config.id });
   } catch (e) {
-    const code = (e as { code?: string }).code ?? null;
-    const message = e instanceof Error ? e.message : String(e);
-    const hint = (e as { hint?: string }).hint ?? null;
-    const details = (e as { details?: string }).details ?? null;
-    console.error("[ai-configs/POST]", { code, message, hint, details });
+    const info = extractDbError(e);
+    console.error("[AI-CONFIGS-CREATE-FAILURE]", {
+      userId: user.id,
+      errorCode: info.code,
+      errorMessage: info.message,
+      errorDetails: info.details,
+      errorHint: info.hint,
+      insertedFields: Object.keys(insert),
+      nullFields: Object.entries(insert)
+        .filter(([, v]) => v === null || v === undefined)
+        .map(([k]) => k),
+      userIdProvided: !!insert.user_id,
+    });
     return NextResponse.json(
       {
         error: "AI設定の作成に失敗しました",
-        debug: { code, message, hint, details },
+        debug: info,
       },
       { status: 500 },
     );

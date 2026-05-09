@@ -7,6 +7,7 @@ import {
   updateAiConfig,
 } from "@/lib/db/ai-configs";
 import { toStringArray } from "@/lib/ai/normalize-extracted";
+import { extractDbError } from "@/lib/db/error";
 import type { AiConfigUpdate } from "@/lib/supabase/types";
 
 const ARRAY_FIELDS = new Set<keyof AiConfigUpdate>([
@@ -98,16 +99,17 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     }
     return NextResponse.json({ id });
   } catch (e) {
-    const code = (e as { code?: string }).code ?? null;
-    const message = e instanceof Error ? e.message : String(e);
-    const hint = (e as { hint?: string }).hint ?? null;
-    const details = (e as { details?: string }).details ?? null;
-    console.error("[ai-configs/PATCH]", { code, message, hint, details });
+    const info = extractDbError(e);
+    console.error("[AI-CONFIGS-PATCH-FAILURE]", {
+      configId: id,
+      errorCode: info.code,
+      errorMessage: info.message,
+      errorDetails: info.details,
+      errorHint: info.hint,
+      patchedFields: Object.keys(patch),
+    });
     return NextResponse.json(
-      {
-        error: "更新に失敗しました",
-        debug: { code, message, hint, details },
-      },
+      { error: "更新に失敗しました", debug: info },
       { status: 500 },
     );
   }

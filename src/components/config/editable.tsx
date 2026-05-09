@@ -18,6 +18,20 @@ type ApiError = {
   debug?: { code?: string | null; message?: string | null; hint?: string | null };
 };
 
+function safeMsg(e: unknown, fallback: string): string {
+  if (typeof e === "string") return e;
+  if (e && typeof e === "object") {
+    const m = (e as { message?: unknown }).message;
+    if (typeof m === "string" && m) return m;
+    try {
+      return JSON.stringify(e);
+    } catch {
+      /* noop */
+    }
+  }
+  return fallback;
+}
+
 async function patchConfig(
   id: string,
   patch: Record<string, unknown>,
@@ -64,7 +78,7 @@ export function EditableText({
       setEditing(false);
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "保存に失敗しました");
+      setError(safeMsg(e, "保存に失敗しました"));
     } finally {
       setSaving(false);
     }
@@ -160,7 +174,7 @@ export function EditableTextarea({
       setEditing(false);
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "保存に失敗しました");
+      setError(safeMsg(e, "保存に失敗しました"));
     } finally {
       setSaving(false);
     }
@@ -258,7 +272,7 @@ export function EditableTags({
       setEditing(false);
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "保存に失敗しました");
+      setError(safeMsg(e, "保存に失敗しました"));
     } finally {
       setSaving(false);
     }
@@ -385,7 +399,7 @@ export function EditableLines({
       setEditing(false);
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "保存に失敗しました");
+      setError(safeMsg(e, "保存に失敗しました"));
     } finally {
       setSaving(false);
     }
