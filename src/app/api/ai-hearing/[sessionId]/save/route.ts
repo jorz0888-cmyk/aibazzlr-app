@@ -5,6 +5,7 @@ import {
   updateHearingSession,
 } from "@/lib/db/ai-hearing-sessions";
 import { createAiConfig, setDefaultAiConfig } from "@/lib/db/ai-configs";
+import { normalizeExtractedData } from "@/lib/ai/normalize-extracted";
 import {
   normalizeAccountMode,
   type AiConfigInsert,
@@ -55,11 +56,17 @@ export async function POST(request: NextRequest, { params }: Ctx) {
 
   const body = (await request.json().catch(() => ({}))) as SaveBody;
 
-  // Merge user-edited fields on top of the AI extraction.
-  const data: ExtractedHearingData = {
+  // Merge user-edited fields on top of the AI extraction, then normalize.
+  // Normalize coerces stray strings into arrays etc., so that DB writes
+  // (text[] columns) don't fail when the AI returns "A、B" as a string.
+  const merged = {
     ...session.extracted_data,
     ...(body.prompt_overrides ?? {}),
   };
+  const data: ExtractedHearingData = normalizeExtractedData(
+    merged,
+    normalizeAccountMode(session.account_mode),
+  );
 
   const finalizedPrompt =
     body.prompt_overrides?.generated_system_prompt ??

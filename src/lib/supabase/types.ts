@@ -154,6 +154,8 @@ export type HearingMessage = {
 export type ExtractedHearingData = {
   complete?: boolean;
   account_mode?: AccountMode;
+  /** Display name for the AI config; falls back to business_name. */
+  name?: string;
   industry?: string;
   business_name?: string;
   business_description?: string;

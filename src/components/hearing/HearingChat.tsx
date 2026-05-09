@@ -73,14 +73,14 @@ export function HearingChat({ initial }: { initial: AiHearingSession }) {
     }
   }
 
-  async function runFinalize() {
+  async function runFinalize(opts: { force?: boolean } = {}) {
     setFinalizing("running");
     setFinalizeError(null);
     try {
-      const res = await fetch(
-        `/api/ai-hearing/${initial.id}/finalize`,
-        { method: "POST" },
-      );
+      const url =
+        `/api/ai-hearing/${initial.id}/finalize` +
+        (opts.force ? "?force=true" : "");
+      const res = await fetch(url, { method: "POST" });
       const body = await res.json().catch(() => ({}) as Record<string, unknown>);
       if (!res.ok) {
         throw new Error(
@@ -182,6 +182,12 @@ export function HearingChat({ initial }: { initial: AiHearingSession }) {
     await runFinalize();
   }
 
+  async function forceFinalize() {
+    if (finalizing === "running") return;
+    finalizeTriedRef.current = true;
+    await runFinalize({ force: true });
+  }
+
   const showFinalizeBanner =
     finalizing === "running" ||
     finalizing === "error" ||
@@ -232,6 +238,7 @@ export function HearingChat({ initial }: { initial: AiHearingSession }) {
             state={finalizing}
             error={finalizeError}
             onRetry={manualFinalize}
+            onForce={forceFinalize}
             sessionId={initial.id}
           />
         )}
@@ -274,11 +281,13 @@ function FinalizeBanner({
   state,
   error,
   onRetry,
+  onForce,
   sessionId,
 }: {
   state: FinalizingState;
   error: string | null;
   onRetry: () => void;
+  onForce: () => void;
   sessionId: string;
 }) {
   if (state === "running") {
@@ -311,13 +320,19 @@ function FinalizeBanner({
           <button type="button" onClick={onRetry} className="btn-primary">
             もう一度試す
           </button>
+          <button type="button" onClick={onForce} className="btn-secondary">
+            ⚡ 最低限の情報で完了する（強制）
+          </button>
           <a
             href={`/dashboard/settings/ai/new/hearing/${sessionId}/preview`}
-            className="btn-secondary"
+            className="btn-ghost"
           >
             プレビュー画面へ移動
           </a>
         </div>
+        <p className="pt-1 text-[11px] text-ink-subtle">
+          「強制完了」を押すと、ヒアリングで取れた情報だけでセッションを完了させ、プレビュー画面で編集できます。
+        </p>
       </div>
     );
   }

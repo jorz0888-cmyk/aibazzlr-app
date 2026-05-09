@@ -184,11 +184,13 @@ ${hashtagBlock}
 /**
  * Robust extractor for the interviewer's final structured output.
  *
- * Handles, in order:
- *   1. Fenced ```json ... ``` blocks
+ * 4-stage fallback:
+ *   1. Fenced ```json ... ``` blocks (last one wins)
  *   2. Fenced ``` ... ``` (no language tag) that look like JSON
- *   3. Bare {...} containing "complete": ...
- *   4. Trailing-truncation: balanced-brace recovery from a partial response
+ *   3. Balanced {...} containing "complete":
+ *   4. Greedy first-brace-to-last-brace
+ *   5. Per-line single-line JSON (last match wins)
+ *   6. Truncated recovery: longest balanced prefix
  *
  * Returns null only if no plausible JSON object is found.
  */
@@ -199,14 +201,17 @@ export function tryExtractFinalJson(
 
   const candidates: string[] = [];
 
-  // 1. ```json ... ```
+  // 1. ```json ... ``` (prefer the LAST fenced block — Claude sometimes
+  //    emits an example fence first, then the real one)
   const fencedJson = [...text.matchAll(/```json\s*([\s\S]*?)```/gi)];
-  for (const m of fencedJson) candidates.push(m[1]);
+  for (let i = fencedJson.length - 1; i >= 0; i--) {
+    candidates.push(fencedJson[i][1]);
+  }
 
-  // 2. ``` ... ``` without language tag, but only if content starts with {
+  // 2. ``` ... ``` without language tag
   const fencedAny = [...text.matchAll(/```\s*([\s\S]*?)```/g)];
-  for (const m of fencedAny) {
-    const inner = m[1].trim();
+  for (let i = fencedAny.length - 1; i >= 0; i--) {
+    const inner = fencedAny[i][1].trim();
     if (inner.startsWith("{")) candidates.push(inner);
   }
 
@@ -214,17 +219,36 @@ export function tryExtractFinalJson(
   const bare = sliceBalancedObjectAround(text, /"complete"\s*:/);
   if (bare) candidates.push(bare);
 
-  // 4. Try each candidate (most specific first)
+  // 4. Greedy first { → last }
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    candidates.push(text.slice(firstBrace, lastBrace + 1));
+  }
+
+  // 5. Per-line single-line JSON (last match wins)
+  const lines = text.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const t = lines[i].trim();
+    if (t.startsWith("{") && t.endsWith("}")) candidates.push(t);
+  }
+
+  // First pass: prefer entries with complete === true
   for (const raw of candidates) {
     const parsed = safeJsonParse(raw);
     if (parsed && parsed.complete === true) return parsed;
   }
 
-  // 5. Last resort: any candidate that has the right shape, even without
-  //    `complete: true` (for cases where Claude forgot the flag)
+  // Second pass: any plausibly-shaped candidate, force complete = true
   for (const raw of candidates) {
     const parsed = safeJsonParse(raw);
-    if (parsed && (parsed.business_name || parsed.world_view)) {
+    if (
+      parsed &&
+      (parsed.business_name ||
+        parsed.world_view ||
+        parsed.industry ||
+        parsed.name)
+    ) {
       return { complete: true, ...parsed };
     }
   }

@@ -14,6 +14,7 @@ import {
   stripJsonFence,
   tryExtractFinalJson,
 } from "@/lib/ai/v14-builder";
+import { normalizeExtractedData } from "@/lib/ai/normalize-extracted";
 import {
   normalizeAccountMode,
   type HearingMessage,
@@ -88,9 +89,13 @@ export async function POST(request: NextRequest, { params }: Ctx) {
         }));
 
         const sessionMode = normalizeAccountMode(session.account_mode);
+        // Real mode emits a much larger JSON (extra fields: menu_items,
+        // seasonal_items, real_episodes, announcement_topics, etc.) so we
+        // need significantly more headroom on the final turn.
+        const maxTokens = sessionMode === "real" ? 8192 : 4096;
         const aiStream = anthropic.messages.stream({
           model: HEARING_MODEL,
-          max_tokens: 3000, // headroom for JSON output (~2k tokens)
+          max_tokens: maxTokens,
           system: interviewerPromptFor(sessionMode),
           messages: apiMessages,
         });
@@ -136,11 +141,10 @@ export async function POST(request: NextRequest, { params }: Ctx) {
 
         if (extracted) {
           const sessionMode = normalizeAccountMode(session.account_mode);
-          // Make sure the extracted data carries the correct mode tag so
-          // downstream save/reload knows which template was used.
-          if (!extracted.account_mode) extracted.account_mode = sessionMode;
+          // Normalize: fill defaults, coerce arrays/strings, ensure mode tag.
+          const normalized = normalizeExtractedData(extracted, sessionMode);
           const generatedPrompt = buildSystemPromptForMode(
-            extracted,
+            normalized,
             sessionMode,
           );
           // Try the full update; if a column doesn't exist (42703), fall
@@ -150,7 +154,7 @@ export async function POST(request: NextRequest, { params }: Ctx) {
               ...messagesWithUser,
               { ...assistantMsg, content: visibleText || fullText },
             ],
-            extracted_data: extracted,
+            extracted_data: normalized,
             generated_system_prompt: generatedPrompt,
             status: "completed" as const,
             generated_at: new Date().toISOString(),
@@ -169,7 +173,7 @@ export async function POST(request: NextRequest, { params }: Ctx) {
                 ...messagesWithUser,
                 { ...assistantMsg, content: visibleText || fullText },
               ],
-              extracted_data: extracted,
+              extracted_data: normalized,
               generated_system_prompt: generatedPrompt,
               status: "completed" as const,
               current_step: TOTAL_HEARING_STEPS,
