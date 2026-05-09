@@ -232,6 +232,7 @@ export function HearingChat({ initial }: { initial: AiHearingSession }) {
             state={finalizing}
             error={finalizeError}
             onRetry={manualFinalize}
+            sessionId={initial.id}
           />
         )}
       </div>
@@ -273,18 +274,31 @@ function FinalizeBanner({
   state,
   error,
   onRetry,
+  sessionId,
 }: {
   state: FinalizingState;
   error: string | null;
   onRetry: () => void;
+  sessionId: string;
 }) {
   if (state === "running") {
     return (
-      <div className="flex items-center gap-3 rounded-xl border border-cyan/30 bg-cyan/5 p-4 text-sm text-ink">
-        <Spinner size={16} />
-        <span>
-          会話の内容をAIが整理しています...（最大1分ほどかかります）
-        </span>
+      <div className="space-y-2 rounded-xl border border-cyan/30 bg-cyan/5 p-4 text-sm text-ink">
+        <div className="flex items-center gap-3">
+          <Spinner size={16} />
+          <span>
+            会話の内容をAIが整理しています...（最大1分ほどかかります）
+          </span>
+        </div>
+        <div className="pt-1 text-[11px] text-ink-subtle">
+          長時間かかる場合は{" "}
+          <a
+            href={`/dashboard/settings/ai/new/hearing/${sessionId}/preview`}
+            className="link-cyan"
+          >
+            プレビュー画面を直接開く
+          </a>
+        </div>
       </div>
     );
   }
@@ -293,18 +307,22 @@ function FinalizeBanner({
       <div className="space-y-2 rounded-xl border border-danger/30 bg-danger/5 p-4 text-sm text-ink">
         <div className="font-bold">完了処理に失敗しました</div>
         {error && <div className="text-xs text-ink-muted">{error}</div>}
-        <button
-          type="button"
-          onClick={onRetry}
-          className="btn-primary mt-2"
-        >
-          もう一度試す
-        </button>
+        <div className="flex flex-wrap gap-2 pt-2">
+          <button type="button" onClick={onRetry} className="btn-primary">
+            もう一度試す
+          </button>
+          <a
+            href={`/dashboard/settings/ai/new/hearing/${sessionId}/preview`}
+            className="btn-secondary"
+          >
+            プレビュー画面へ移動
+          </a>
+        </div>
       </div>
     );
   }
   return (
-    <div className="flex items-center justify-between rounded-xl border border-cyan/30 bg-cyan/5 p-4 text-sm text-ink">
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-cyan/30 bg-cyan/5 p-4 text-sm text-ink">
       <span>10問のヒアリングが完了しました。次のステップへ進めます。</span>
       <button type="button" onClick={onRetry} className="btn-primary">
         プロンプトを生成して保存へ →

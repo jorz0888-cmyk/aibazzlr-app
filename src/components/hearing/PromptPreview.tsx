@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Spinner } from "@/components/Spinner";
+import { TestPostGenerator } from "./TestPostGenerator";
 import type { ExtractedHearingData } from "@/lib/supabase/types";
 
 type Props = {
@@ -211,6 +212,11 @@ export function PromptPreview({
           </pre>
         )}
       </Section>
+
+      <TestPostGenerator
+        sessionId={sessionId}
+        brandName={name || "あなたのブランド"}
+      />
 
       <div className="card flex flex-wrap items-center justify-between gap-3 p-5">
         <label className="flex items-center gap-2 text-sm text-ink">
