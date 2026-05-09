@@ -9,6 +9,7 @@ import {
   fetchXUserInfo,
 } from "@/lib/oauth/x-client";
 import { encryptToken } from "@/lib/oauth/encryption";
+import { syncPlatformIds } from "@/lib/db/social-accounts";
 import { extractDbError } from "@/lib/db/error";
 
 export const runtime = "nodejs";
@@ -97,6 +98,10 @@ export async function GET(request: NextRequest) {
     const payload = {
       user_id: user.id,
       platform: "x" as const,
+      // Both columns mirror X's user.id. platform_account_id is a Phase 4
+      // NOT NULL legacy column; platform_user_id was added in Phase 6 for
+      // OAuth bookkeeping. Keep them in lock-step.
+      platform_account_id: xUser.id,
       platform_user_id: xUser.id,
       username: xUser.username,
       display_name: xUser.name,
@@ -117,10 +122,16 @@ export async function GET(request: NextRequest) {
       last_synced_at: new Date().toISOString(),
     };
 
+    // Defensive: even if the payload above already sets both ID columns,
+    // run through syncPlatformIds in case future edits drop one of them.
     const { error: upsertError } = await supabase
       .from("social_accounts")
-      .upsert(payload, {
-        onConflict: "user_id,platform,platform_user_id",
+      .upsert(syncPlatformIds(payload), {
+        // Use the legacy NOT NULL column for conflict detection — its
+        // unique constraint has been in place since Phase 4. The new
+        // platform_user_id always carries the same value, so re-connecting
+        // the same X account still resolves correctly.
+        onConflict: "user_id,platform,platform_account_id",
       });
 
     if (upsertError) {

@@ -37,13 +37,33 @@ export async function getSocialAccountById(
   return data;
 }
 
+/**
+ * Ensure platform_user_id (Phase 6) and platform_account_id (Phase 4 legacy
+ * NOT NULL) always carry the same value. Call this on every INSERT/UPSERT
+ * site so we never trip the legacy column's not-null constraint again.
+ */
+export function syncPlatformIds<
+  T extends {
+    platform_user_id?: string | null;
+    platform_account_id?: string | null;
+  },
+>(input: T): T {
+  const id = input.platform_user_id ?? input.platform_account_id ?? null;
+  if (!id) return input;
+  return {
+    ...input,
+    platform_user_id: id,
+    platform_account_id: id,
+  };
+}
+
 export async function createSocialAccount(
   supabase: DB,
   input: SocialAccountInsert,
 ): Promise<SocialAccount> {
   const { data, error } = await supabase
     .from(TABLE)
-    .insert(input)
+    .insert(syncPlatformIds(input))
     .select("*")
     .single();
 

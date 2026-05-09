@@ -60,6 +60,8 @@ export type SocialAccount = {
   scopes: string[] | null;
   token_type: string | null;
   platform_user_id: string | null;
+  /** Phase 4 legacy NOT NULL column. Always equals platform_user_id. */
+  platform_account_id: string;
   profile_image_url: string | null;
   status: SocialAccountStatus;
   is_primary: boolean;
