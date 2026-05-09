@@ -5,13 +5,79 @@ import {
 } from "@/lib/supabase/types";
 
 /**
- * Coerce arbitrary input into a string[] so DB writes don't blow up when
- * Claude returns a string ("A、B、C") or null where an array was expected.
+ * Convert a single array element into a human-readable string.
+ *
+ * Claude often returns objects like `{ name, price }` for menu_items or
+ * `{ name, season }` for seasonal_items. Postgres text[] columns can't
+ * accept objects, and the UI rendering them blindly produces "[object Object]".
+ *
+ * This function picks the most natural string form from common shapes:
+ *   { name, price }       → "ジンギスカン（1200円）"
+ *   { name, season }      → "夏限定冷麺（夏）"
+ *   { name, description } → "看板メニュー：説明"
+ *   { name }              → "name"
+ *   { title } / { text } / { value } → that field
+ *   anything else         → join scalar values with "・"
+ *   nothing usable        → JSON.stringify (last resort)
  */
-function toArray(value: unknown): string[] {
+function normalizeArrayItem(item: unknown): string {
+  if (item === null || item === undefined) return "";
+  if (typeof item === "string") return item.trim();
+  if (typeof item === "number" || typeof item === "boolean") return String(item);
+
+  if (typeof item === "object") {
+    const obj = item as Record<string, unknown>;
+    const get = (k: string): string =>
+      typeof obj[k] === "string" || typeof obj[k] === "number"
+        ? String(obj[k]).trim()
+        : "";
+
+    const name = get("name");
+    const price = get("price");
+    const season = get("season");
+    const description = get("description");
+
+    if (name && price) return `${name}（${price}）`;
+    if (name && season) return `${name}（${season}）`;
+    if (name && description) return `${name}：${description}`;
+    if (name) return name;
+
+    const title = get("title");
+    if (title) return title;
+    const text = get("text");
+    if (text) return text;
+    const value = get("value");
+    if (value) return value;
+
+    // Generic fallback: join all scalar values with "・"
+    const scalars = Object.values(obj).filter(
+      (v) =>
+        v !== null &&
+        v !== undefined &&
+        (typeof v === "string" || typeof v === "number"),
+    );
+    if (scalars.length > 0) return scalars.map((s) => String(s).trim()).join("・");
+
+    try {
+      return JSON.stringify(item);
+    } catch {
+      return "";
+    }
+  }
+
+  return String(item);
+}
+
+/**
+ * Coerce arbitrary input into a string[] so DB writes don't blow up when
+ * Claude returns a string ("A、B、C"), an array of objects, or null where an
+ * array was expected.
+ */
+export function toStringArray(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value
-      .map((v) => (typeof v === "string" ? v.trim() : String(v ?? "").trim()))
+      .map((v) => normalizeArrayItem(v))
+      .map((s) => s.trim())
       .filter(Boolean);
   }
   if (typeof value === "string") {
@@ -22,6 +88,9 @@ function toArray(value: unknown): string[] {
   }
   return [];
 }
+
+/** Backwards-compatible alias used inside normalizeExtractedData. */
+const toArray = toStringArray;
 
 function toStr(value: unknown, fallback = ""): string {
   if (typeof value === "string") return value.trim();

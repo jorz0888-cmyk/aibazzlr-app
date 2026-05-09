@@ -5,7 +5,10 @@ import {
   updateHearingSession,
 } from "@/lib/db/ai-hearing-sessions";
 import { createAiConfig, setDefaultAiConfig } from "@/lib/db/ai-configs";
-import { normalizeExtractedData } from "@/lib/ai/normalize-extracted";
+import {
+  normalizeExtractedData,
+  toStringArray,
+} from "@/lib/ai/normalize-extracted";
 import {
   normalizeAccountMode,
   type AiConfigInsert,
@@ -94,11 +97,11 @@ export async function POST(request: NextRequest, { params }: Ctx) {
     world_view: data.world_view ?? null,
     voice_tone: data.voice_tone ?? null,
     target_audience: data.target_audience ?? null,
-    ng_words: ensureArray(data.ng_words),
-    must_include_elements: ensureArray(data.must_include_elements),
-    good_examples: ensureArray(data.good_examples),
+    ng_words: toStringArray(data.ng_words),
+    must_include_elements: toStringArray(data.must_include_elements),
+    good_examples: toStringArray(data.good_examples),
     bad_examples: [],
-    hashtag_pool: ensureArray(data.hashtag_pool),
+    hashtag_pool: toStringArray(data.hashtag_pool),
     hashtags_per_post: 3,
     posting_frequency: null,
     posting_times: null,
@@ -110,10 +113,10 @@ export async function POST(request: NextRequest, { params }: Ctx) {
     closed_days: data.closed_days ?? null,
     address: data.address ?? null,
     price_range: data.price_range ?? null,
-    menu_items: ensureArray(data.menu_items),
-    seasonal_items: ensureArray(data.seasonal_items),
-    real_episodes: ensureArray(data.real_episodes),
-    announcement_topics: ensureArray(data.announcement_topics),
+    menu_items: toStringArray(data.menu_items),
+    seasonal_items: toStringArray(data.seasonal_items),
+    real_episodes: toStringArray(data.real_episodes),
+    announcement_topics: toStringArray(data.announcement_topics),
   };
 
   let configId: string;
@@ -130,9 +133,34 @@ export async function POST(request: NextRequest, { params }: Ctx) {
       status: "completed",
     });
   } catch (e) {
-    console.error("[hearing/save]", e);
+    const code = (e as { code?: string }).code ?? null;
+    const message = e instanceof Error ? e.message : String(e);
+    const hint = (e as { hint?: string }).hint ?? null;
+    const details = (e as { details?: string }).details ?? null;
+    console.error("[AI-CONFIGS-SAVE-FAILURE]", {
+      sessionId,
+      userId: user.id,
+      code,
+      message,
+      hint,
+      details,
+      arrayFieldsRaw: {
+        menu_items_type: typeof (data.menu_items?.[0] as unknown),
+        menu_items_sample: data.menu_items?.[0],
+        seasonal_items_type: typeof (data.seasonal_items?.[0] as unknown),
+        seasonal_items_sample: data.seasonal_items?.[0],
+      },
+      normalizedFields: {
+        menu_items: insert.menu_items,
+        seasonal_items: insert.seasonal_items,
+        ng_words: insert.ng_words,
+      },
+    });
     return NextResponse.json(
-      { error: "AI設定の保存に失敗しました" },
+      {
+        error: "AI設定の保存に失敗しました",
+        debug_save: { code, message, hint, details },
+      },
       { status: 500 },
     );
   }

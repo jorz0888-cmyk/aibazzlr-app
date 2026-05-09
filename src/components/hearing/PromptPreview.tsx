@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Spinner } from "@/components/Spinner";
 import { TestPostGenerator } from "./TestPostGenerator";
+import { toStringArray } from "@/lib/ai/normalize-extracted";
 import type { ExtractedHearingData } from "@/lib/supabase/types";
 
 type Props = {
@@ -37,6 +38,12 @@ export function PromptPreview({
   const [isDefault, setIsDefault] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorDebug, setErrorDebug] = useState<{
+    code?: string | null;
+    message?: string | null;
+    hint?: string | null;
+    details?: string | null;
+  } | null>(null);
 
   function splitLines(s: string) {
     return s
@@ -79,7 +86,11 @@ export function PromptPreview({
         }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
+        const err = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          debug_save?: typeof errorDebug;
+        };
+        if (err.debug_save) setErrorDebug(err.debug_save);
         throw new Error(err.error ?? `HTTP ${res.status}`);
       }
       const { aiConfigId } = (await res.json()) as { aiConfigId: string };
@@ -279,7 +290,22 @@ export function PromptPreview({
           デフォルトのAI設定にする
         </label>
 
-        {error && <div className="err flex-1 sm:max-w-md">{error}</div>}
+        {error && (
+          <div className="err w-full space-y-1 sm:max-w-md">
+            <div>{error}</div>
+            {errorDebug && (
+              <details className="text-[11px] text-danger/70">
+                <summary className="cursor-pointer">技術的な詳細</summary>
+                <pre className="mt-1 whitespace-pre-wrap break-all font-mono">
+                  {errorDebug.code ? `[${errorDebug.code}] ` : ""}
+                  {errorDebug.message ?? ""}
+                  {errorDebug.hint ? `\nヒント: ${errorDebug.hint}` : ""}
+                  {errorDebug.details ? `\n詳細: ${errorDebug.details}` : ""}
+                </pre>
+              </details>
+            )}
+          </div>
+        )}
 
         <div className="flex gap-2">
           <button
@@ -368,9 +394,11 @@ function ReadOnlyList({
   items,
 }: {
   label: string;
-  items: string[] | null | undefined;
+  items: unknown;
 }) {
-  const list = (items ?? []).filter(Boolean);
+  // Defensive: items might still contain object entries if Claude emitted
+  // {name, price} shapes. Always coerce through toStringArray.
+  const list = toStringArray(items);
   return (
     <div>
       <div className="label">

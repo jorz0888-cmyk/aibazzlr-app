@@ -63,9 +63,16 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ id: config.id });
   } catch (e) {
-    console.error("[ai-configs/POST]", e);
+    const code = (e as { code?: string }).code ?? null;
+    const message = e instanceof Error ? e.message : String(e);
+    const hint = (e as { hint?: string }).hint ?? null;
+    const details = (e as { details?: string }).details ?? null;
+    console.error("[ai-configs/POST]", { code, message, hint, details });
     return NextResponse.json(
-      { error: "AI設定の作成に失敗しました" },
+      {
+        error: "AI設定の作成に失敗しました",
+        debug: { code, message, hint, details },
+      },
       { status: 500 },
     );
   }

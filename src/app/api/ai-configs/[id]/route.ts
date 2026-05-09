@@ -6,7 +6,21 @@ import {
   setDefaultAiConfig,
   updateAiConfig,
 } from "@/lib/db/ai-configs";
+import { toStringArray } from "@/lib/ai/normalize-extracted";
 import type { AiConfigUpdate } from "@/lib/supabase/types";
+
+const ARRAY_FIELDS = new Set<keyof AiConfigUpdate>([
+  "ng_words",
+  "must_include_elements",
+  "good_examples",
+  "bad_examples",
+  "hashtag_pool",
+  "menu_items",
+  "seasonal_items",
+  "real_episodes",
+  "announcement_topics",
+  "social_account_ids",
+]);
 
 export const runtime = "nodejs";
 
@@ -56,11 +70,24 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     "generated_system_prompt",
     "requires_approval",
     "status",
+    // Phase 5.8 real-mode fields
+    "account_mode",
+    "business_hours",
+    "closed_days",
+    "address",
+    "price_range",
+    "menu_items",
+    "seasonal_items",
+    "real_episodes",
+    "announcement_topics",
   ];
   for (const key of passthrough) {
     if (key in body) {
+      const raw = body[key];
+      // Normalize array fields so {name, price} objects don't reach Postgres.
+      const value = ARRAY_FIELDS.has(key) ? toStringArray(raw) : raw;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (patch as any)[key] = body[key];
+      (patch as any)[key] = value;
     }
   }
 
@@ -71,9 +98,16 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     }
     return NextResponse.json({ id });
   } catch (e) {
-    console.error("[ai-configs/PATCH]", e);
+    const code = (e as { code?: string }).code ?? null;
+    const message = e instanceof Error ? e.message : String(e);
+    const hint = (e as { hint?: string }).hint ?? null;
+    const details = (e as { details?: string }).details ?? null;
+    console.error("[ai-configs/PATCH]", { code, message, hint, details });
     return NextResponse.json(
-      { error: "更新に失敗しました" },
+      {
+        error: "更新に失敗しました",
+        debug: { code, message, hint, details },
+      },
       { status: 500 },
     );
   }

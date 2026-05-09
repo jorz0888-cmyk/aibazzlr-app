@@ -2,6 +2,13 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getAiConfigById } from "@/lib/db/ai-configs";
+import { toStringArray } from "@/lib/ai/normalize-extracted";
+import {
+  EditableLines,
+  EditableTags,
+  EditableText,
+  EditableTextarea,
+} from "@/components/config/editable";
 import { ConfigDetailActions } from "./ConfigDetailActions";
 
 export const dynamic = "force-dynamic";
@@ -21,10 +28,16 @@ export default async function ConfigDetailPage({
   const config = await getAiConfigById(supabase, id);
   if (!config || config.user_id !== user.id) notFound();
 
-  const must = config.must_include_elements ?? [];
-  const ng = config.ng_words ?? [];
-  const hashtags = config.hashtag_pool ?? [];
-  const examples = config.good_examples ?? [];
+  // Defensive normalization: even if old rows still contain object entries,
+  // toStringArray cleans them up before render.
+  const must = toStringArray(config.must_include_elements);
+  const ng = toStringArray(config.ng_words);
+  const hashtags = toStringArray(config.hashtag_pool);
+  const examples = toStringArray(config.good_examples);
+  const menu = toStringArray(config.menu_items);
+  const seasonal = toStringArray(config.seasonal_items);
+  const episodes = toStringArray(config.real_episodes);
+  const announcements = toStringArray(config.announcement_topics);
 
   return (
     <div className="space-y-8">
@@ -81,156 +94,188 @@ export default async function ConfigDetailPage({
       </div>
 
       <Card title="基本情報">
-        <Row label="ビジネス名" value={config.business_name} />
-        <Row label="業種" value={config.industry} />
-        <Row label="投稿者の役割" value={config.persona_role} />
-        <Row label="ターゲット読者" value={config.target_audience} />
-        <Row label="声のトーン" value={config.voice_tone} />
-        <Row label="投稿頻度" value={config.posting_frequency} />
-        <Row
-          label="承認モード"
-          value={config.requires_approval ? "承認制" : "完全自動"}
+        <EditableText
+          configId={config.id}
+          field="name"
+          initial={config.name}
+          label="設定名"
+        />
+        <EditableText
+          configId={config.id}
+          field="business_name"
+          initial={config.business_name}
+          label="ビジネス名"
+        />
+        <EditableText
+          configId={config.id}
+          field="industry"
+          initial={config.industry}
+          label="業種"
+        />
+        <EditableText
+          configId={config.id}
+          field="persona_role"
+          initial={config.persona_role}
+          label="投稿者の役割"
+          placeholder="店主 / スタッフ / オーナーなど"
+        />
+        <EditableText
+          configId={config.id}
+          field="target_audience"
+          initial={config.target_audience}
+          label="ターゲット読者"
+        />
+        <EditableText
+          configId={config.id}
+          field="voice_tone"
+          initial={config.voice_tone}
+          label="声のトーン"
+          placeholder="casual_polite / friendly_polite など"
+        />
+        <EditableText
+          configId={config.id}
+          field="posting_frequency"
+          initial={config.posting_frequency}
+          label="投稿頻度"
         />
       </Card>
 
       {config.account_mode === "real" && (
-        <Card title="実在情報（捏造禁止モード）">
-          <Row label="営業時間" value={config.business_hours} />
-          <Row label="定休日" value={config.closed_days} />
-          <Row label="所在地" value={config.address} />
-          <Row label="価格帯" value={config.price_range} />
-          <Row
-            label="看板メニュー"
-            value={
-              (config.menu_items?.length ?? 0) > 0
-                ? config.menu_items.join(" / ")
-                : null
-            }
+        <Card title="🏪 実在情報（編集可能）">
+          <EditableText
+            configId={config.id}
+            field="business_hours"
+            initial={config.business_hours}
+            label="営業時間"
+            placeholder="11:30-14:00 / 17:30-22:00"
           />
-          <Row
-            label="季節限定"
-            value={
-              (config.seasonal_items?.length ?? 0) > 0
-                ? config.seasonal_items.join(" / ")
-                : null
-            }
+          <EditableText
+            configId={config.id}
+            field="closed_days"
+            initial={config.closed_days}
+            label="定休日"
+            placeholder="水曜日・第3木曜日"
           />
-          <Row
-            label="実話エピソード"
-            value={
-              (config.real_episodes?.length ?? 0) > 0
-                ? `${config.real_episodes.length}件登録`
-                : null
-            }
+          <EditableText
+            configId={config.id}
+            field="address"
+            initial={config.address}
+            label="所在地"
+            placeholder="東京都中野区中野5丁目"
           />
-          <Row
-            label="告知テーマ"
-            value={
-              (config.announcement_topics?.length ?? 0) > 0
-                ? config.announcement_topics.join(" / ")
-                : null
-            }
+          <EditableText
+            configId={config.id}
+            field="price_range"
+            initial={config.price_range}
+            label="価格帯"
+            placeholder="ランチ800-1200円 / ディナー2000-3500円"
           />
+
+          <div className="mt-5 space-y-4 border-t border-line pt-5">
+            <EditableTags
+              configId={config.id}
+              field="menu_items"
+              initial={menu}
+              label="看板メニュー"
+              variant="cyan"
+            />
+            <EditableTags
+              configId={config.id}
+              field="seasonal_items"
+              initial={seasonal}
+              label="季節限定・日替わり"
+              variant="cyan"
+            />
+            <EditableLines
+              configId={config.id}
+              field="real_episodes"
+              initial={episodes}
+              label="実話エピソード（許可済み）"
+              placeholder="エピソードを1件入力..."
+            />
+            <EditableTags
+              configId={config.id}
+              field="announcement_topics"
+              initial={announcements}
+              label="告知テーマ"
+              variant="muted"
+            />
+          </div>
         </Card>
       )}
 
       <Card title="世界観">
-        <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">
-          {config.world_view ?? "（未設定）"}
-        </p>
-        {config.business_description && (
-          <p className="mt-3 text-xs text-ink-muted">
-            概要: {config.business_description}
-          </p>
-        )}
+        <EditableTextarea
+          configId={config.id}
+          field="world_view"
+          initial={config.world_view}
+          label="世界観"
+          rows={6}
+        />
+        <div className="mt-4">
+          <EditableTextarea
+            configId={config.id}
+            field="business_description"
+            initial={config.business_description}
+            label="ブランド概要"
+            rows={3}
+          />
+        </div>
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card title={`必須要素（${must.length}）`}>
-          {must.length === 0 ? (
-            <Empty />
-          ) : (
-            <ul className="space-y-1.5 text-sm text-ink">
-              {must.map((m, i) => (
-                <li key={i} className="flex gap-2">
-                  <span className="font-mono text-[11px] text-cyan">
-                    {String(i + 1).padStart(2, "0")}
-                  </span>
-                  <span>{m}</span>
-                </li>
-              ))}
-            </ul>
-          )}
+        <Card title="必須要素">
+          <EditableTags
+            configId={config.id}
+            field="must_include_elements"
+            initial={must}
+            label=""
+            variant="cyan"
+            max={5}
+          />
         </Card>
 
-        <Card title={`NGワード（${ng.length}）`}>
-          {ng.length === 0 ? (
-            <Empty />
-          ) : (
-            <div className="flex flex-wrap gap-1.5">
-              {ng.map((w, i) => (
-                <span
-                  key={i}
-                  className="rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 font-mono text-[11px] text-danger"
-                >
-                  {w}
-                </span>
-              ))}
-            </div>
-          )}
+        <Card title="NGワード">
+          <EditableTags
+            configId={config.id}
+            field="ng_words"
+            initial={ng}
+            label=""
+            variant="danger"
+            max={10}
+          />
         </Card>
       </div>
 
-      <Card title={`良い投稿例（${examples.length}）`}>
-        {examples.length === 0 ? (
-          <Empty />
-        ) : (
-          <ul className="space-y-3">
-            {examples.map((ex, i) => (
-              <li
-                key={i}
-                className="rounded-lg border border-line bg-bg/40 p-4 text-sm leading-relaxed text-ink"
-              >
-                <span className="mr-2 font-mono text-[11px] text-ink-subtle">
-                  #{i + 1}
-                </span>
-                <span className="whitespace-pre-wrap">{ex}</span>
-              </li>
-            ))}
-          </ul>
-        )}
+      <Card title="良い投稿例">
+        <EditableLines
+          configId={config.id}
+          field="good_examples"
+          initial={examples}
+          label=""
+          placeholder="良い投稿例を入力..."
+        />
       </Card>
 
-      <Card title={`ハッシュタグプール（${hashtags.length}）`}>
-        {hashtags.length === 0 ? (
-          <Empty />
-        ) : (
-          <div className="flex flex-wrap gap-1.5">
-            {hashtags.map((h, i) => (
-              <span
-                key={i}
-                className="rounded-full border border-cyan/30 bg-cyan/5 px-2 py-0.5 font-mono text-[11px] text-cyan"
-              >
-                {h.startsWith("#") ? h : `#${h}`}
-              </span>
-            ))}
-          </div>
-        )}
+      <Card title="ハッシュタグプール">
+        <EditableTags
+          configId={config.id}
+          field="hashtag_pool"
+          initial={hashtags}
+          label=""
+          variant="cyan"
+          max={10}
+        />
       </Card>
 
       <Card title="生成されたシステムプロンプト">
-        {config.generated_system_prompt ? (
-          <details className="group">
-            <summary className="cursor-pointer text-sm text-cyan group-open:text-ink-muted">
-              ▸ 全文を表示する
-            </summary>
-            <pre className="mt-3 max-h-[480px] overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-bg/60 p-4 font-mono text-[12px] leading-relaxed text-ink-muted">
-              {config.generated_system_prompt}
-            </pre>
-          </details>
-        ) : (
-          <Empty />
-        )}
+        <EditableTextarea
+          configId={config.id}
+          field="generated_system_prompt"
+          initial={config.generated_system_prompt}
+          label="システムプロンプト（手動編集可）"
+          rows={20}
+        />
       </Card>
     </div>
   );
@@ -251,17 +296,4 @@ function Card({
       {children}
     </section>
   );
-}
-
-function Row({ label, value }: { label: string; value: string | null }) {
-  return (
-    <div className="grid grid-cols-[140px_1fr] items-baseline gap-3 border-b border-line py-2.5 last:border-b-0">
-      <span className="text-xs text-ink-muted">{label}</span>
-      <span className="text-sm text-ink">{value ?? "—"}</span>
-    </div>
-  );
-}
-
-function Empty() {
-  return <div className="text-sm text-ink-subtle">未登録</div>;
 }
