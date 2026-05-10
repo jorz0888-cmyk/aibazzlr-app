@@ -23,7 +23,9 @@ export function PostGeneratorModal({
     aiConfigs.find((c) => c.is_default)?.id ?? aiConfigs[0]?.id ?? "",
   );
   const [socialAccountId, setSocialAccountId] = useState(
-    socialAccounts[0]?.id ?? "",
+    socialAccounts.find((a) => a.is_primary)?.id ??
+      socialAccounts[0]?.id ??
+      "",
   );
   const [theme, setTheme] = useState("");
   const [loading, setLoading] = useState(false);
@@ -125,8 +127,10 @@ export function PostGeneratorModal({
           >
             {socialAccounts.map((a) => (
               <option key={a.id} value={a.id}>
+                {a.is_primary ? "★ " : ""}
                 {a.platform.toUpperCase()} · @{a.username}
                 {a.display_name ? ` (${a.display_name})` : ""}
+                {a.is_primary ? " — PRIMARY" : ""}
               </option>
             ))}
           </select>

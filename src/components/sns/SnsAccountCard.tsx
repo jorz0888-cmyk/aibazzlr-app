@@ -39,7 +39,9 @@ function relativeTime(iso: string | null): string {
 
 export function SnsAccountCard({ account }: { account: SocialAccount }) {
   const router = useRouter();
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<
+    null | "disconnect" | "primary"
+  >(null);
   const [error, setError] = useState<string | null>(null);
 
   const meta = PLATFORM_META[account.platform];
@@ -57,7 +59,7 @@ export function SnsAccountCard({ account }: { account: SocialAccount }) {
     )
       return;
     setError(null);
-    setLoading(true);
+    setLoading("disconnect");
     try {
       const res = await fetch("/api/auth/x/disconnect", {
         method: "POST",
@@ -76,7 +78,27 @@ export function SnsAccountCard({ account }: { account: SocialAccount }) {
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "解除に失敗しました");
-      setLoading(false);
+      setLoading(null);
+    }
+  }
+
+  async function setAsPrimary() {
+    if (loading) return;
+    setError(null);
+    setLoading("primary");
+    try {
+      const res = await fetch(
+        `/api/social-accounts/${account.id}/primary`,
+        { method: "PATCH" },
+      );
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "PRIMARY 切替に失敗しました");
+      setLoading(null);
     }
   }
 
@@ -140,13 +162,27 @@ export function SnsAccountCard({ account }: { account: SocialAccount }) {
 
       {/* Actions */}
       <div className="flex items-center gap-2">
+        {!account.is_primary && status === "active" && (
+          <button
+            type="button"
+            onClick={setAsPrimary}
+            disabled={loading !== null}
+            className="btn-secondary"
+          >
+            {loading === "primary" ? (
+              <Spinner size={14} />
+            ) : (
+              "PRIMARY に設定"
+            )}
+          </button>
+        )}
         <button
           type="button"
           onClick={disconnect}
-          disabled={loading}
+          disabled={loading !== null}
           className="btn-secondary border-danger/30 text-danger hover:bg-danger/10"
         >
-          {loading ? <Spinner size={14} /> : "連携解除"}
+          {loading === "disconnect" ? <Spinner size={14} /> : "連携解除"}
         </button>
       </div>
 

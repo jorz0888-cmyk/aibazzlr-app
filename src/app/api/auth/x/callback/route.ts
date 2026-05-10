@@ -94,7 +94,34 @@ export async function GET(request: NextRequest) {
       : null;
     const expiresAt = new Date(Date.now() + tokenResponse.expires_in * 1000);
 
-    // 5. Upsert social_account
+    // 5. Decide is_primary: only the FIRST active account for this
+    // (user, platform) becomes primary. Re-connecting an existing account
+    // preserves its current is_primary value so we don't accidentally
+    // demote a user's chosen primary.
+    const { data: existing } = await supabase
+      .from("social_accounts")
+      .select("id, is_primary, platform_account_id, status")
+      .eq("user_id", user.id)
+      .eq("platform", "x");
+
+    const existingRows = existing ?? [];
+    const sameAccount = existingRows.find(
+      (a) => a.platform_account_id === xUser.id,
+    );
+    const otherActive = existingRows.filter(
+      (a) => a.platform_account_id !== xUser.id && a.status === "active",
+    );
+
+    let isPrimary: boolean;
+    if (sameAccount) {
+      // Re-connecting → keep whatever it was. Defensive false fallback.
+      isPrimary = Boolean(sameAccount.is_primary);
+    } else {
+      // Brand new connection → primary only if no other active accounts.
+      isPrimary = otherActive.length === 0;
+    }
+
+    // 6. Upsert social_account
     const payload = {
       user_id: user.id,
       platform: "x" as const,
@@ -117,6 +144,11 @@ export async function GET(request: NextRequest) {
       token_expires_at: expiresAt.toISOString(),
       scopes: tokenResponse.scope.split(" "),
       token_type: tokenResponse.token_type,
+
+      // ★ Phase 6.1: must be explicit so the DB default (true) doesn't
+      // collide with the unique partial index
+      // (user_id, platform) WHERE is_primary.
+      is_primary: isPrimary,
 
       status: "active" as const,
       last_synced_at: new Date().toISOString(),
