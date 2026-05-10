@@ -130,9 +130,6 @@ export function TestPostGenerator({
             >
               🔄 もう一度生成
             </button>
-            <span className="grid place-items-center text-[11px] text-ink-subtle">
-              💰 1回あたり約2円
-            </span>
           </div>
 
           {history.length > 0 && (

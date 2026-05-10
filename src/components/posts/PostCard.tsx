@@ -234,18 +234,12 @@ export function PostCard({ post }: { post: PostListItem }) {
             </button>
           )}
         </footer>
-
-        {post.generation_metadata?.cost_estimate != null && (
-          <div className="border-t border-line pt-2 text-[10px] text-ink-subtle">
-            💰 生成コスト: 約 ${" "}
-            {(post.generation_metadata.cost_estimate as number).toFixed(4)}
-            {post.generation_metadata.model && (
-              <span className="ml-2">
-                · {post.generation_metadata.model}
-              </span>
-            )}
-          </div>
-        )}
+        {/*
+          Cost / model info is intentionally hidden from the UI.
+          The data is still persisted in `generation_metadata` for monthly
+          cost tracking, anomaly detection, and the future Phase 9 "usage"
+          dashboard (incl. BYOK plans where re-display might be desired).
+        */}
       </article>
 
       <PostEditorModal
