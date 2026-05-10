@@ -59,71 +59,76 @@ export function PostEditorModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur"
+      className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur sm:p-6"
       onClick={onClose}
     >
       <div
-        className="card w-full max-w-xl space-y-4 p-6"
+        className="card flex max-h-[95vh] w-full max-w-xl flex-col overflow-hidden p-0 sm:max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div>
+        {/* Header — sticky */}
+        <header className="shrink-0 border-b border-line p-5 sm:p-6">
           <p className="font-mono text-[11px] tracking-[0.25em] text-cyan">
             ── EDIT DRAFT
           </p>
           <h2 className="mt-1 text-lg font-bold text-ink">投稿を編集</h2>
-        </div>
+        </header>
 
-        <div>
-          <label className="label">本文</label>
-          <textarea
-            className="input min-h-[140px]"
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            rows={6}
-          />
-          <div className="mt-1 flex items-center justify-between text-[11px]">
-            <span
-              className={over ? "text-danger" : "text-ink-subtle"}
-            >
-              {totalLen} / {MAX_LEN} 文字（本文 + ハッシュタグ）
-            </span>
+        {/* Body — scrolls when textarea / tags grow */}
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5 sm:p-6">
+          <div>
+            <label className="label">本文</label>
+            <textarea
+              className="input min-h-[140px]"
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              rows={6}
+            />
+            <div className="mt-1 flex items-center justify-between text-[11px]">
+              <span className={over ? "text-danger" : "text-ink-subtle"}>
+                {totalLen} / {MAX_LEN} 文字（本文 + ハッシュタグ）
+              </span>
+            </div>
           </div>
+
+          <div>
+            <label className="label">ハッシュタグ</label>
+            <TagInput value={hashtags} onChange={setHashtags} max={10} />
+          </div>
+
+          <div>
+            <label className="label">テーマ（任意）</label>
+            <input
+              className="input"
+              value={theme}
+              onChange={(e) => setTheme(e.target.value)}
+            />
+          </div>
+
+          {error && <div className="err">{error}</div>}
         </div>
 
-        <div>
-          <label className="label">ハッシュタグ</label>
-          <TagInput value={hashtags} onChange={setHashtags} max={10} />
-        </div>
-
-        <div>
-          <label className="label">テーマ（任意）</label>
-          <input
-            className="input"
-            value={theme}
-            onChange={(e) => setTheme(e.target.value)}
-          />
-        </div>
-
-        {error && <div className="err">{error}</div>}
-
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={onClose}
-            disabled={saving}
-          >
-            キャンセル
-          </button>
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={save}
-            disabled={saving || over}
-          >
-            {saving ? <Spinner /> : "保存"}
-          </button>
-        </div>
+        {/* Footer — sticky */}
+        <footer className="shrink-0 border-t border-line bg-bg-surface/95 p-4 backdrop-blur sm:p-5">
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              className="btn-secondary w-full sm:w-auto"
+              onClick={onClose}
+              disabled={saving}
+            >
+              キャンセル
+            </button>
+            <button
+              type="button"
+              className="btn-primary w-full sm:w-auto"
+              onClick={save}
+              disabled={saving || over}
+            >
+              {saving ? <Spinner /> : "保存"}
+            </button>
+          </div>
+        </footer>
       </div>
     </div>
   );

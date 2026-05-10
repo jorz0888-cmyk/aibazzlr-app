@@ -64,14 +64,15 @@ export function PostGeneratorModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur"
+      className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur sm:p-6"
       onClick={onClose}
     >
       <div
-        className="card w-full max-w-lg space-y-5 p-6"
+        className="card flex max-h-[95vh] w-full max-w-lg flex-col overflow-hidden p-0 sm:max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div>
+        {/* Header — sticky */}
+        <header className="shrink-0 border-b border-line p-5 sm:p-6">
           <p className="font-mono text-[11px] tracking-[0.25em] text-cyan">
             ── NEW DRAFT
           </p>
@@ -81,98 +82,104 @@ export function PostGeneratorModal({
           <p className="mt-1 text-xs text-ink-muted">
             AI設定と投稿先アカウントを選んで、ドラフトを作成します。
           </p>
-        </div>
+        </header>
 
-        {aiConfigs.length === 0 ? (
-          <div className="err">
-            利用可能なAI設定がありません。先に
-            <a className="link-cyan" href="/dashboard/settings/ai/new">
-              AI設定を作成
-            </a>
-            してください。
+        {/* Body — scrolls when error banners + selects + theme overflow */}
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5 sm:p-6">
+          {aiConfigs.length === 0 ? (
+            <div className="err">
+              利用可能なAI設定がありません。先に
+              <a className="link-cyan" href="/dashboard/settings/ai/new">
+                AI設定を作成
+              </a>
+              してください。
+            </div>
+          ) : null}
+          {socialAccounts.length === 0 ? (
+            <div className="err">
+              連携済みSNSアカウントがありません。先に
+              <a className="link-cyan" href="/dashboard/sns">
+                X連携
+              </a>
+              を行ってください。
+            </div>
+          ) : null}
+
+          <div>
+            <label className="label">AI設定</label>
+            <select
+              className="input"
+              value={aiConfigId}
+              onChange={(e) => setAiConfigId(e.target.value)}
+            >
+              {aiConfigs.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.account_mode === "real" ? "🏪" : "🎭"} {c.name}
+                  {c.is_default ? "（デフォルト）" : ""}
+                </option>
+              ))}
+            </select>
           </div>
-        ) : null}
-        {socialAccounts.length === 0 ? (
-          <div className="err">
-            連携済みSNSアカウントがありません。先に
-            <a className="link-cyan" href="/dashboard/sns">
-              X連携
-            </a>
-            を行ってください。
+
+          <div>
+            <label className="label">投稿先アカウント</label>
+            <select
+              className="input"
+              value={socialAccountId}
+              onChange={(e) => setSocialAccountId(e.target.value)}
+            >
+              {socialAccounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.is_primary ? "★ " : ""}
+                  {a.platform.toUpperCase()} · @{a.username}
+                  {a.display_name ? ` (${a.display_name})` : ""}
+                  {a.is_primary ? " — PRIMARY" : ""}
+                </option>
+              ))}
+            </select>
           </div>
-        ) : null}
 
-        <div>
-          <label className="label">AI設定</label>
-          <select
-            className="input"
-            value={aiConfigId}
-            onChange={(e) => setAiConfigId(e.target.value)}
-          >
-            {aiConfigs.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.account_mode === "real" ? "🏪" : "🎭"} {c.name}
-                {c.is_default ? "（デフォルト）" : ""}
-              </option>
-            ))}
-          </select>
+          <div>
+            <label className="label">テーマ（任意）</label>
+            <input
+              type="text"
+              className="input"
+              value={theme}
+              onChange={(e) => setTheme(e.target.value)}
+              placeholder="例：今日の日替わり、季節の挨拶... 空ならAIに任せます"
+            />
+          </div>
+
+          {error && <div className="err">{error}</div>}
         </div>
 
-        <div>
-          <label className="label">投稿先アカウント</label>
-          <select
-            className="input"
-            value={socialAccountId}
-            onChange={(e) => setSocialAccountId(e.target.value)}
-          >
-            {socialAccounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.is_primary ? "★ " : ""}
-                {a.platform.toUpperCase()} · @{a.username}
-                {a.display_name ? ` (${a.display_name})` : ""}
-                {a.is_primary ? " — PRIMARY" : ""}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className="label">テーマ（任意）</label>
-          <input
-            type="text"
-            className="input"
-            value={theme}
-            onChange={(e) => setTheme(e.target.value)}
-            placeholder="例：今日の日替わり、季節の挨拶... 空ならAIに任せます"
-          />
-        </div>
-
-        {error && <div className="err">{error}</div>}
-
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={onClose}
-            disabled={loading}
-          >
-            キャンセル
-          </button>
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={generate}
-            disabled={
-              loading ||
-              !aiConfigId ||
-              !socialAccountId ||
-              aiConfigs.length === 0 ||
-              socialAccounts.length === 0
-            }
-          >
-            {loading ? <Spinner /> : "ドラフトを生成"}
-          </button>
-        </div>
+        {/* Footer — sticky */}
+        <footer className="shrink-0 border-t border-line bg-bg-surface/95 p-4 backdrop-blur sm:p-5">
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              className="btn-secondary w-full sm:w-auto"
+              onClick={onClose}
+              disabled={loading}
+            >
+              キャンセル
+            </button>
+            <button
+              type="button"
+              className="btn-primary w-full sm:w-auto"
+              onClick={generate}
+              disabled={
+                loading ||
+                !aiConfigId ||
+                !socialAccountId ||
+                aiConfigs.length === 0 ||
+                socialAccounts.length === 0
+              }
+            >
+              {loading ? <Spinner /> : "ドラフトを生成"}
+            </button>
+          </div>
+        </footer>
       </div>
     </div>
   );
