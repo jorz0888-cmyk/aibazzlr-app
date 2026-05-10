@@ -14,9 +14,12 @@ export type SocialAccountStatus =
   | "error";
 
 export type PostStatus =
+  | "pending"
   | "draft"
+  | "queued"
   | "scheduled"
   | "publishing"
+  | "posted"
   | "published"
   | "failed"
   | "cancelled";
@@ -129,6 +132,17 @@ export type AiConfig = {
   updated_at: string;
 };
 
+export type GenerationMetadata = {
+  model?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  cost_estimate?: number;
+  generated_at?: string;
+  prompt_strategy?: string;
+  attempts?: string[];
+  [key: string]: unknown;
+};
+
 export type Post = {
   id: string;
   user_id: string;
@@ -137,10 +151,20 @@ export type Post = {
   status: PostStatus;
   scheduled_at: string | null;
   published_at: string | null;
+  posted_at: string | null;
   content: string;
+  hashtags: string[];
+  theme: string | null;
   image_url: string | null;
+  // Phase 6+: X-side identifiers
+  platform_post_id: string | null;
+  platform_post_url: string | null;
+  // Legacy column (kept for back-compat)
   external_post_id: string | null;
   engagement_count: number;
+  engagement_data: Record<string, unknown> | null;
+  generation_metadata: GenerationMetadata | null;
+  retry_count: number;
   error_message: string | null;
   created_at: string;
   updated_at: string;
