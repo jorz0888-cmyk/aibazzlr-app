@@ -73,9 +73,15 @@ export async function DELETE(_request: NextRequest, { params }: Ctx) {
   const auth = await authorize(id);
   if ("error" in auth) return auth.error;
 
-  if (auth.post.status !== "draft") {
+  // Statuses safe to delete from the UI. `posted`/`published` rows are kept
+  // for history; `publishing` could be racing with X API and shouldn't be
+  // nuked mid-flight.
+  const deletable = ["draft", "failed", "cancelled"];
+  if (!deletable.includes(auth.post.status)) {
     return NextResponse.json(
-      { error: "ドラフト以外は削除できません" },
+      {
+        error: `この投稿は削除できません（status: ${auth.post.status}）`,
+      },
       { status: 409 },
     );
   }

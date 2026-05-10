@@ -74,7 +74,13 @@ export function PostCard({ post }: { post: PostListItem }) {
   }
 
   async function remove() {
-    if (!window.confirm("このドラフトを削除しますか？")) return;
+    const label =
+      post.status === "failed"
+        ? "この失敗投稿を削除しますか？"
+        : post.status === "cancelled"
+          ? "このキャンセル済み投稿を削除しますか？"
+          : "このドラフトを削除しますか？";
+    if (!window.confirm(label)) return;
     setBusy("delete");
     try {
       const res = await fetch(`/api/posts/${post.id}`, { method: "DELETE" });
@@ -224,14 +230,24 @@ export function PostCard({ post }: { post: PostListItem }) {
             </>
           )}
           {post.status === "failed" && (
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={retry}
-              disabled={busy !== null}
-            >
-              {busy === "retry" ? <Spinner /> : "再試行"}
-            </button>
+            <>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={retry}
+                disabled={busy !== null}
+              >
+                {busy === "retry" ? <Spinner /> : "再試行"}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary border-danger/30 text-danger hover:bg-danger/10"
+                onClick={remove}
+                disabled={busy !== null}
+              >
+                {busy === "delete" ? <Spinner size={14} /> : "削除"}
+              </button>
+            </>
           )}
         </footer>
         {/*
