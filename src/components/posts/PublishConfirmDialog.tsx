@@ -25,10 +25,36 @@ export function PublishConfirmDialog({
   const tagText = hashtags.join(" ");
   const totalLen = (tagText ? content + "\n\n" + tagText : content).length;
 
+  // While publishing, replace the dialog body with a centered loading
+  // overlay. Unambiguous "投稿中..." feedback so the user doesn't think the
+  // app froze during the X API roundtrip.
+  if (loading) {
+    return (
+      <div
+        className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4 backdrop-blur"
+        role="status"
+        aria-live="polite"
+      >
+        <div className="card flex flex-col items-center gap-4 px-8 py-10 text-center">
+          <Spinner size={28} />
+          <div>
+            <div className="text-base font-bold text-ink">投稿中...</div>
+            <div className="mt-1 text-xs text-ink-muted">
+              X にツイートを送信しています
+            </div>
+            <div className="mt-2 text-[11px] text-ink-subtle">
+              通信状況により数秒〜10秒ほどかかります
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur sm:p-6"
-      onClick={loading ? undefined : onCancel}
+      onClick={onCancel}
     >
       {/*
         3-row grid: header (固定) / body (内側スクロール) / footer (固定).

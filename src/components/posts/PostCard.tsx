@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Spinner } from "@/components/Spinner";
+import { useToast } from "@/components/common/Toast";
 import { PostEditorModal } from "./PostEditorModal";
 import { PublishConfirmDialog } from "./PublishConfirmDialog";
 import type { PostListItem } from "./types";
@@ -24,6 +25,7 @@ function relTime(iso: string | null): string {
 
 export function PostCard({ post }: { post: PostListItem }) {
   const router = useRouter();
+  const toast = useToast();
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState<null | "publish" | "delete" | "retry">(null);
@@ -45,12 +47,35 @@ export function PostCard({ post }: { post: PostListItem }) {
         ok?: boolean;
         error?: string;
         warning?: string;
+        url?: string;
+        tweet_id?: string;
       };
       if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+
       setConfirming(false);
+      toast.success("投稿が完了しました", {
+        description: (
+          <>
+            <span>
+              <span className="font-bold text-cyan">@{username}</span>{" "}
+              のタイムラインに送信されました。
+            </span>
+            {body.warning && (
+              <div className="mt-1 text-yellow-400">⚠ {body.warning}</div>
+            )}
+          </>
+        ),
+        action: body.url
+          ? { label: "X で投稿を見る", href: body.url }
+          : undefined,
+      });
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "投稿に失敗しました");
+      const msg = e instanceof Error ? e.message : "投稿に失敗しました";
+      setError(msg);
+      toast.error("投稿に失敗しました", {
+        description: msg,
+      });
     } finally {
       setBusy(null);
     }
@@ -63,11 +88,23 @@ export function PostCard({ post }: { post: PostListItem }) {
       const res = await fetch(`/api/posts/${post.id}/retry`, {
         method: "POST",
       });
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        url?: string;
+        warning?: string;
+      };
       if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      toast.success("再投稿に成功しました", {
+        description: `@${username} に送信されました`,
+        action: body.url
+          ? { label: "X で投稿を見る", href: body.url }
+          : undefined,
+      });
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "再試行に失敗しました");
+      const msg = e instanceof Error ? e.message : "再試行に失敗しました";
+      setError(msg);
+      toast.error("再試行に失敗しました", { description: msg });
     } finally {
       setBusy(null);
     }
@@ -88,9 +125,12 @@ export function PostCard({ post }: { post: PostListItem }) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
+      toast.info("投稿を削除しました");
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "削除に失敗しました");
+      const msg = e instanceof Error ? e.message : "削除に失敗しました";
+      setError(msg);
+      toast.error("削除に失敗しました", { description: msg });
       setBusy(null);
     }
   }
