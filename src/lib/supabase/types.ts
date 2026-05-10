@@ -166,9 +166,16 @@ export type Post = {
   hashtags: string[];
   theme: string | null;
   image_url: string | null;
-  // Phase 6+: X-side identifiers
+  image_prompt: string | null;
+  image_storage_path: string | null;
+  // Phase 6+: platform routing
+  platform: Platform;
   platform_post_id: string | null;
   platform_post_url: string | null;
+  // Approval workflow
+  approved_by: string | null;
+  approved_at: string | null;
+  rejection_reason: string | null;
   // Legacy column (kept for back-compat)
   external_post_id: string | null;
   /** All engagement metrics live in this jsonb (likes/retweets/etc). */

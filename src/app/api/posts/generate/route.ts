@@ -3,7 +3,9 @@ import { createClient } from "@/lib/supabase/server";
 import { getAiConfigById } from "@/lib/db/ai-configs";
 import { getSocialAccountById } from "@/lib/db/social-accounts";
 import { extractDbError } from "@/lib/db/error";
+import { applyPostDefaults } from "@/lib/db/post-defaults";
 import { generatePostDraft } from "@/lib/posts/generator";
+import type { Platform } from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -67,25 +69,24 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 2. Persist as draft. `engagement_data` has a DB default ('{}'::jsonb)
-  // so we don't pass it explicitly. There is NO `engagement_count` column.
-  const insertPayload = {
+  // 2. Persist as draft. applyPostDefaults fills in NOT-NULL columns
+  //    (status, scheduled_at, hashtags, platform, engagement_data,
+  //    generation_metadata, retry_count) so a missing DB default never
+  //    triggers a 23502 here.
+  const insertPayload = applyPostDefaults({
     user_id: user.id,
     ai_config_id: aiConfig.id,
     social_account_id: account.id,
-    platform: account.platform,
-    status: "draft" as const,
+    platform: account.platform as Platform,
     content: generated.content,
     hashtags: generated.hashtags,
     theme: generated.theme,
     generation_metadata: generated.metadata,
-    retry_count: 0,
-  };
+  });
 
   const { data, error } = await supabase
     .from("posts")
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .insert(insertPayload as any)
+    .insert(insertPayload)
     .select("*")
     .single();
 

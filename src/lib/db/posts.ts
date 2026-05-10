@@ -4,6 +4,7 @@ import type {
   PostStatus,
   PostUpdate,
 } from "@/lib/supabase/types";
+import { applyPostDefaults } from "./post-defaults";
 import type { DBClient as DB } from "./_client-type";
 
 const TABLE = "posts";
@@ -76,7 +77,7 @@ export async function createPost(
 ): Promise<Post> {
   const { data, error } = await supabase
     .from(TABLE)
-    .insert(input)
+    .insert(applyPostDefaults(input))
     .select("*")
     .single();
 
