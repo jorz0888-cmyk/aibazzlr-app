@@ -231,14 +231,23 @@ export function PostCard({ post }: { post: PostListItem }) {
           )}
           {post.status === "failed" && (
             <>
-              <button
-                type="button"
-                className="btn-primary"
-                onClick={retry}
-                disabled={busy !== null}
-              >
-                {busy === "retry" ? <Spinner /> : "再試行"}
-              </button>
+              {/* 二重投稿防止: 既に platform_post_id が埋まっていれば
+                  X 側に投稿済 → 再試行ボタン自体を非表示。retry 上限超過も同様。 */}
+              {!post.platform_post_id && (post.retry_count ?? 0) < 3 && (
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={retry}
+                  disabled={busy !== null}
+                >
+                  {busy === "retry" ? <Spinner /> : "再試行"}
+                </button>
+              )}
+              {(post.retry_count ?? 0) >= 3 && !post.platform_post_id && (
+                <span className="text-[11px] text-ink-subtle">
+                  再試行回数の上限です。編集してから新規生成してください。
+                </span>
+              )}
               <button
                 type="button"
                 className="btn-secondary border-danger/30 text-danger hover:bg-danger/10"
