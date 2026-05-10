@@ -11,7 +11,8 @@ export type SocialAccountStatus =
   | "active"
   | "expired"
   | "disconnected"
-  | "error";
+  | "error"
+  | "token_invalid";
 
 export type PostStatus =
   | "pending"

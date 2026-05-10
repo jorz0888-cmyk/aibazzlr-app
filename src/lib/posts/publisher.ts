@@ -1,6 +1,6 @@
 import {
-  getDecryptedAccessToken,
   getSocialAccountById,
+  getValidAccessToken,
 } from "@/lib/db/social-accounts";
 import {
   buildPostUrl,
@@ -56,7 +56,10 @@ export async function publishPostToX(
       status: null,
     };
   }
-  if (account.status !== "active") {
+  // Allow active and the auto-recoverable states. token_invalid will be
+  // bumped back to active by getValidAccessToken if the refresh succeeds.
+  const refreshableStates = ["active", "expired", "token_invalid"];
+  if (!refreshableStates.includes(account.status)) {
     return {
       ok: false,
       errorMessage: `投稿先アカウントが利用不可状態です（${account.status}）`,
@@ -75,25 +78,16 @@ export async function publishPostToX(
     };
   }
 
-  let accessToken: string | null;
+  // Phase 7-2: getValidAccessToken auto-refreshes the token if it's near
+  // expiry. On unrecoverable failure (refresh_token dead) it also marks
+  // the account as `token_invalid` so the UI can prompt re-auth.
+  let accessToken: string;
   try {
-    accessToken = await getDecryptedAccessToken(
-      supabase,
-      account.id,
-      userId,
-    );
+    accessToken = await getValidAccessToken(supabase, account.id, userId);
   } catch (e) {
     return {
       ok: false,
-      errorMessage: `アクセストークンの復号化に失敗しました: ${e instanceof Error ? e.message : String(e)}`,
-      status: null,
-    };
-  }
-  if (!accessToken) {
-    return {
-      ok: false,
-      errorMessage:
-        "アクセストークンが見つかりませんでした。X連携を再度実行してください。",
+      errorMessage: e instanceof Error ? e.message : String(e),
       status: null,
     };
   }

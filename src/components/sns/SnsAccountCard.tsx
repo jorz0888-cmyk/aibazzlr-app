@@ -40,15 +40,25 @@ function relativeTime(iso: string | null): string {
 export function SnsAccountCard({ account }: { account: SocialAccount }) {
   const router = useRouter();
   const [loading, setLoading] = useState<
-    null | "disconnect" | "primary"
+    null | "disconnect" | "primary" | "reauth"
   >(null);
   const [error, setError] = useState<string | null>(null);
 
   const meta = PLATFORM_META[account.platform];
-  const expired =
-    account.token_expires_at &&
-    new Date(account.token_expires_at).getTime() < Date.now();
-  const status = expired ? "expired" : account.status;
+
+  // Phase 7-2: tokens are now auto-refreshed by getValidAccessToken at
+  // publish-time. So a "near-expiry" timestamp is NOT a problem — only
+  // the explicit `token_invalid` status (set when refresh itself fails)
+  // needs user intervention. We keep the time-based check around purely
+  // for legacy data where the status field wasn't yet populated.
+  const isTokenInvalid =
+    account.status === "token_invalid" || account.status === "error";
+  const isDisconnected = account.status === "disconnected";
+  const status = isTokenInvalid
+    ? "token_invalid"
+    : isDisconnected
+      ? "disconnected"
+      : account.status;
 
   async function disconnect() {
     if (loading) return;
@@ -78,6 +88,27 @@ export function SnsAccountCard({ account }: { account: SocialAccount }) {
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "解除に失敗しました");
+      setLoading(null);
+    }
+  }
+
+  async function reconnect() {
+    if (loading) return;
+    setError(null);
+    setLoading("reauth");
+    try {
+      const res = await fetch("/api/auth/x/login", { method: "POST" });
+      const body = (await res.json().catch(() => ({}))) as {
+        redirect_url?: string;
+        error?: string;
+      };
+      if (res.ok && body.redirect_url) {
+        window.location.href = body.redirect_url;
+        return;
+      }
+      throw new Error(body.error ?? `HTTP ${res.status}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "再連携に失敗しました");
       setLoading(null);
     }
   }
@@ -147,11 +178,19 @@ export function SnsAccountCard({ account }: { account: SocialAccount }) {
       <div className="text-right">
         {status === "active" ? (
           <span className="inline-flex items-center gap-1 text-xs font-semibold text-success">
-            ● 接続済み
+            ● 接続済み（自動更新中）
+          </span>
+        ) : status === "token_invalid" ? (
+          <span className="inline-flex items-center gap-1 text-xs font-semibold text-danger">
+            ⚠️ 再連携が必要です
+          </span>
+        ) : status === "disconnected" ? (
+          <span className="inline-flex items-center gap-1 text-xs font-semibold text-ink-muted">
+            ● 切断済み
           </span>
         ) : status === "expired" ? (
           <span className="inline-flex items-center gap-1 text-xs font-semibold text-yellow-400">
-            ⚠️ トークン期限切れ
+            ⚠️ トークン期限切れ（次回投稿時に自動更新）
           </span>
         ) : (
           <span className="inline-flex items-center gap-1 text-xs font-semibold text-ink-muted">
@@ -162,6 +201,16 @@ export function SnsAccountCard({ account }: { account: SocialAccount }) {
 
       {/* Actions */}
       <div className="flex items-center gap-2">
+        {status === "token_invalid" && (
+          <button
+            type="button"
+            onClick={reconnect}
+            disabled={loading !== null}
+            className="btn-primary"
+          >
+            {loading === "reauth" ? <Spinner size={14} /> : "🔄 再連携する"}
+          </button>
+        )}
         {!account.is_primary && status === "active" && (
           <button
             type="button"

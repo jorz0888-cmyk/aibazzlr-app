@@ -97,6 +97,102 @@ export async function exchangeCodeForToken(params: {
   return (await res.json()) as XTokenResponse;
 }
 
+/**
+ * Phase 7-2 convenience wrapper: pulls credentials from env so callers
+ * don't have to. Throws a typed error so the caller can decide whether
+ * to mark the account as token_invalid (refresh_token dead) or just
+ * retry later (transient network failure).
+ */
+export class XRefreshError extends Error {
+  /** True when the refresh_token itself is dead (re-auth required). */
+  fatal: boolean;
+  status: number;
+  constructor(message: string, fatal: boolean, status: number) {
+    super(message);
+    this.fatal = fatal;
+    this.status = status;
+    this.name = "XRefreshError";
+  }
+}
+
+export async function refreshXAccessToken(refreshToken: string): Promise<{
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+  scope: string;
+}> {
+  const clientId = process.env.X_CLIENT_ID;
+  const clientSecret = process.env.X_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    throw new XRefreshError(
+      "X_CLIENT_ID / X_CLIENT_SECRET が未設定です",
+      false,
+      0,
+    );
+  }
+
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+    client_id: clientId,
+  });
+
+  let response: Response;
+  try {
+    response = await fetch(X_TOKEN_URL, {
+      method: "POST",
+      headers: {
+        Authorization: basicAuthHeader(clientId, clientSecret),
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: body.toString(),
+    });
+  } catch (e) {
+    throw new XRefreshError(
+      `Xへの接続に失敗: ${e instanceof Error ? e.message : String(e)}`,
+      false,
+      0,
+    );
+  }
+
+  if (!response.ok) {
+    const errBody = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      error_description?: string;
+    };
+    const code = errBody.error ?? "";
+    const desc = errBody.error_description ?? "";
+    // invalid_grant / invalid_request / unauthorized_client → refresh_token
+    // が完全に無効。それ以外は一時的とみなす。
+    const fatal =
+      code === "invalid_grant" ||
+      code === "invalid_request" ||
+      code === "unauthorized_client" ||
+      response.status === 401;
+    throw new XRefreshError(
+      `X token refresh failed (${response.status}) ${code}${desc ? `: ${desc}` : ""}`,
+      fatal,
+      response.status,
+    );
+  }
+
+  const data = (await response.json()) as {
+    access_token: string;
+    refresh_token?: string;
+    expires_in: number;
+    scope: string;
+  };
+
+  return {
+    accessToken: data.access_token,
+    // X always rotates the refresh_token; if absent (some flows omit it)
+    // fall back to the one we sent so we don't lose access.
+    refreshToken: data.refresh_token ?? refreshToken,
+    expiresIn: data.expires_in,
+    scope: data.scope,
+  };
+}
+
 export async function refreshAccessToken(params: {
   refreshToken: string;
   clientId: string;

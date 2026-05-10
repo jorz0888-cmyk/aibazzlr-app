@@ -4,7 +4,8 @@ import type {
   SocialAccountInsert,
   SocialAccountUpdate,
 } from "@/lib/supabase/types";
-import { decryptToken, type EncryptedData } from "@/lib/oauth/encryption";
+import { decryptToken, encryptToken, type EncryptedData } from "@/lib/oauth/encryption";
+import { refreshXAccessToken, XRefreshError } from "@/lib/oauth/x-client";
 import type { DBClient as DB } from "./_client-type";
 
 const TABLE = "social_accounts";
@@ -160,6 +161,165 @@ export async function getDecryptedAccessToken(
     tag: data.access_token_tag,
   };
   return decryptToken(enc);
+}
+
+/**
+ * Phase 7-2: return a still-valid access_token for the given account.
+ *
+ * If `token_expires_at` is within 5 minutes of now (or null), we automatically
+ * call X's refresh endpoint, persist the rotated tokens encrypted, and return
+ * the fresh access_token.
+ *
+ * On unrecoverable refresh failures (refresh_token dead) the account is
+ * marked `status = 'token_invalid'` so the UI can prompt the user to
+ * re-authenticate. Transient failures (network, X 5xx) leave the status
+ * untouched and just throw.
+ */
+export async function getValidAccessToken(
+  supabase: DB,
+  socialAccountId: string,
+  userId: string,
+): Promise<string> {
+  const { data: account, error } = await supabase
+    .from("social_accounts")
+    .select("*")
+    .eq("id", socialAccountId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!account) {
+    throw new Error("Social account not found or unauthorized");
+  }
+
+  if (
+    account.status !== "active" &&
+    account.status !== "expired" &&
+    account.status !== "token_invalid"
+  ) {
+    throw new Error(`Account is not refreshable (status: ${account.status})`);
+  }
+
+  // 1. Decide if a refresh is needed (5 minutes of slack).
+  const expiresAt = account.token_expires_at
+    ? new Date(account.token_expires_at)
+    : null;
+  const fiveMinutesFromNow = new Date(Date.now() + 5 * 60 * 1000);
+  const needsRefresh =
+    !expiresAt ||
+    expiresAt < fiveMinutesFromNow ||
+    account.status === "token_invalid";
+
+  if (
+    !needsRefresh &&
+    account.access_token &&
+    account.access_token_iv &&
+    account.access_token_tag
+  ) {
+    return decryptToken({
+      ciphertext: account.access_token,
+      iv: account.access_token_iv,
+      tag: account.access_token_tag,
+    });
+  }
+
+  // 2. Need a refresh.
+  if (
+    !account.refresh_token ||
+    !account.refresh_token_iv ||
+    !account.refresh_token_tag
+  ) {
+    // Mark token_invalid so the UI can prompt re-auth.
+    await supabase
+      .from("social_accounts")
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .update({ status: "token_invalid" } as any)
+      .eq("id", socialAccountId);
+    throw new Error(
+      "X認証の有効期限が切れました。SNS連携画面から再連携してください。",
+    );
+  }
+
+  console.log("[X-TOKEN-REFRESH] Refreshing", {
+    socialAccountId,
+    userId,
+    expiresAt: expiresAt?.toISOString() ?? null,
+    reason: !expiresAt
+      ? "no_expiry"
+      : account.status === "token_invalid"
+        ? "previously_invalid"
+        : "near_or_past_expiry",
+  });
+
+  let refreshed;
+  try {
+    const decryptedRefresh = decryptToken({
+      ciphertext: account.refresh_token,
+      iv: account.refresh_token_iv,
+      tag: account.refresh_token_tag,
+    });
+    refreshed = await refreshXAccessToken(decryptedRefresh);
+  } catch (e) {
+    const isFatal = e instanceof XRefreshError && e.fatal;
+    console.error("[X-TOKEN-REFRESH] Failed", {
+      socialAccountId,
+      fatal: isFatal,
+      message: e instanceof Error ? e.message : String(e),
+    });
+
+    if (isFatal) {
+      await supabase
+        .from("social_accounts")
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .update({
+          status: "token_invalid",
+          last_synced_at: new Date().toISOString(),
+        } as any)
+        .eq("id", socialAccountId);
+      throw new Error(
+        "X認証の有効期限が切れ、自動更新も失敗しました。SNS連携画面から再連携してください。",
+      );
+    }
+    throw new Error(
+      `Xの認証トークン更新で一時的なエラーが発生しました。再試行してください: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
+  }
+
+  // 3. Encrypt + persist.
+  const encAccess = encryptToken(refreshed.accessToken);
+  const encRefresh = encryptToken(refreshed.refreshToken);
+  const newExpiresAt = new Date(Date.now() + refreshed.expiresIn * 1000);
+
+  const { error: updateError } = await supabase
+    .from("social_accounts")
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .update({
+      access_token: encAccess.ciphertext,
+      access_token_iv: encAccess.iv,
+      access_token_tag: encAccess.tag,
+      refresh_token: encRefresh.ciphertext,
+      refresh_token_iv: encRefresh.iv,
+      refresh_token_tag: encRefresh.tag,
+      token_expires_at: newExpiresAt.toISOString(),
+      last_synced_at: new Date().toISOString(),
+      status: "active",
+      scopes: refreshed.scope ? refreshed.scope.split(" ") : account.scopes,
+    } as any)
+    .eq("id", socialAccountId);
+
+  if (updateError) {
+    console.error("[X-TOKEN-REFRESH] DB update failed", updateError);
+    throw new Error("トークン更新の保存に失敗しました");
+  }
+
+  console.log("[X-TOKEN-REFRESH] Success", {
+    socialAccountId,
+    newExpiresAt: newExpiresAt.toISOString(),
+  });
+
+  return refreshed.accessToken;
 }
 
 export async function setPrimarySocialAccount(
