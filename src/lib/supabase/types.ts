@@ -143,6 +143,16 @@ export type GenerationMetadata = {
   [key: string]: unknown;
 };
 
+/** Engagement metrics stored as jsonb on posts.engagement_data. */
+export type EngagementData = {
+  impressions?: number;
+  likes?: number;
+  retweets?: number;
+  replies?: number;
+  last_synced_at?: string | null;
+  [key: string]: unknown;
+};
+
 export type Post = {
   id: string;
   user_id: string;
@@ -161,8 +171,8 @@ export type Post = {
   platform_post_url: string | null;
   // Legacy column (kept for back-compat)
   external_post_id: string | null;
-  engagement_count: number;
-  engagement_data: Record<string, unknown> | null;
+  /** All engagement metrics live in this jsonb (likes/retweets/etc). */
+  engagement_data: EngagementData | null;
   generation_metadata: GenerationMetadata | null;
   retry_count: number;
   error_message: string | null;

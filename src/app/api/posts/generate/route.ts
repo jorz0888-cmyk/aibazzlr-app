@@ -67,18 +67,19 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 2. Persist as draft
+  // 2. Persist as draft. `engagement_data` has a DB default ('{}'::jsonb)
+  // so we don't pass it explicitly. There is NO `engagement_count` column.
   const insertPayload = {
     user_id: user.id,
     ai_config_id: aiConfig.id,
     social_account_id: account.id,
+    platform: account.platform,
     status: "draft" as const,
     content: generated.content,
     hashtags: generated.hashtags,
     theme: generated.theme,
     generation_metadata: generated.metadata,
     retry_count: 0,
-    engagement_count: 0,
   };
 
   const { data, error } = await supabase
