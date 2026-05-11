@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Spinner } from "@/components/Spinner";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 export function PublishConfirmDialog({
   open,
@@ -10,6 +12,7 @@ export function PublishConfirmDialog({
   hashtags,
   onConfirm,
   onCancel,
+  onAbort,
   loading,
 }: {
   open: boolean;
@@ -19,35 +22,83 @@ export function PublishConfirmDialog({
   hashtags: string[];
   onConfirm: () => void;
   onCancel: () => void;
+  onAbort?: () => void;
   loading: boolean;
 }) {
+  const [abortPromptOpen, setAbortPromptOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (loading) {
+        if (onAbort) setAbortPromptOpen(true);
+      } else {
+        onCancel();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [open, loading, onAbort, onCancel]);
+
+  useEffect(() => {
+    if (!open) setAbortPromptOpen(false);
+  }, [open]);
+
   if (!open) return null;
   const tagText = hashtags.join(" ");
   const totalLen = (tagText ? content + "\n\n" + tagText : content).length;
 
-  // While publishing, replace the dialog body with a centered loading
-  // overlay. Unambiguous "投稿中..." feedback so the user doesn't think the
-  // app froze during the X API roundtrip.
   if (loading) {
     return (
-      <div
-        className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4 backdrop-blur"
-        role="status"
-        aria-live="polite"
-      >
-        <div className="card flex flex-col items-center gap-4 px-8 py-10 text-center">
-          <Spinner size={28} />
-          <div>
-            <div className="text-base font-bold text-ink">投稿中...</div>
-            <div className="mt-1 text-xs text-ink-muted">
-              X にツイートを送信しています
-            </div>
-            <div className="mt-2 text-[11px] text-ink-subtle">
-              通信状況により数秒〜10秒ほどかかります
+      <>
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4 backdrop-blur"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="card flex flex-col items-center gap-4 px-8 py-10 text-center">
+            <Spinner size={28} />
+            <div>
+              <div className="text-base font-bold text-ink">投稿中...</div>
+              <div className="mt-1 text-xs text-ink-muted">
+                X にツイートを送信しています
+              </div>
+              <div className="mt-2 text-[11px] text-ink-subtle">
+                通信状況により数秒〜10秒ほどかかります
+              </div>
+              {onAbort && (
+                <button
+                  type="button"
+                  onClick={() => setAbortPromptOpen(true)}
+                  className="mt-4 text-[11px] text-ink-subtle underline underline-offset-2 transition hover:text-danger"
+                >
+                  Esc または ここをクリックで中断
+                </button>
+              )}
             </div>
           </div>
         </div>
-      </div>
+        <ConfirmDialog
+          open={abortPromptOpen}
+          title="投稿を中断しますか？"
+          description={
+            <>
+              X 側にはすでに投稿されている可能性があります。
+              <br />
+              中断後はポスト一覧でステータスをご確認ください。
+            </>
+          }
+          confirmLabel="中断する"
+          cancelLabel="続行"
+          destructive
+          onConfirm={() => {
+            setAbortPromptOpen(false);
+            onAbort?.();
+          }}
+          onCancel={() => setAbortPromptOpen(false)}
+        />
+      </>
     );
   }
 
@@ -56,16 +107,10 @@ export function PublishConfirmDialog({
       className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur sm:p-6"
       onClick={onCancel}
     >
-      {/*
-        3-row grid: header (固定) / body (内側スクロール) / footer (固定).
-        max-h-[90vh] (95vh on mobile) ensures buttons stay on-screen even
-        for full 280-char drafts without zooming the browser.
-      */}
       <div
         className="card flex max-h-[95vh] w-full max-w-md flex-col overflow-hidden p-0 sm:max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header — sticky */}
         <header className="shrink-0 border-b border-line p-5 sm:p-6">
           <p className="font-mono text-[11px] tracking-[0.25em] text-cyan">
             ── CONFIRM PUBLISH
@@ -87,7 +132,6 @@ export function PublishConfirmDialog({
           </div>
         </header>
 
-        {/* Body — scrolls when content overflows */}
         <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-6">
           <div className="rounded-lg border border-line bg-bg/40 p-4">
             <div className="mb-2 text-[11px] uppercase tracking-wider text-ink-muted">
@@ -115,7 +159,6 @@ export function PublishConfirmDialog({
           </p>
         </div>
 
-        {/* Footer — sticky */}
         <footer className="shrink-0 border-t border-line bg-bg-surface/95 p-4 backdrop-blur sm:p-5">
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <button

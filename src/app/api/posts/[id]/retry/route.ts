@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getPostById } from "@/lib/db/posts";
+import { updatePostWithRetry } from "@/lib/db/post-update";
 import { publishPostToX } from "@/lib/posts/publisher";
 import { extractDbError } from "@/lib/db/error";
 
@@ -8,6 +9,7 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const MAX_RETRY = 3;
+const DB_UPDATE_MAX_RETRIES = 3;
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -102,26 +104,27 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
   const result = await publishPostToX(supabase, post, user.id);
 
   if (result.ok) {
-    // GUARD 2: persist platform_post_id IMMEDIATELY
-    const minimalSave = await supabase
-      .from("posts")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .update({
-        platform_post_id: result.tweetId,
-        platform_post_url: result.url,
-        external_post_id: result.tweetId,
-      } as any)
-      .eq("id", post.id);
+    // GUARD 2: persist platform_post_id (retried)
+    const minimalSave = await updatePostWithRetry(supabase, post.id, {
+      platform_post_id: result.tweetId,
+      platform_post_url: result.url,
+      external_post_id: result.tweetId,
+    });
 
-    if (minimalSave.error) {
+    if (!minimalSave.ok) {
       console.error(
-        "[POSTS-API/retry] CRITICAL: X posted but platform_post_id save failed",
-        {
-          postId: post.id,
-          tweetId: result.tweetId,
-          dbError: minimalSave.error,
-        },
+        "[POSTS-API/retry] CRITICAL: X posted but platform_post_id save failed after retries",
+        { postId: post.id, tweetId: result.tweetId, lastError: minimalSave.error },
       );
+      await supabase
+        .from("posts")
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .update({
+          error_message: `X 側で投稿成功 (tweet_id=${result.tweetId}) したが、DBへのID保存に失敗: ${minimalSave.error}`,
+          updated_at: new Date().toISOString(),
+        } as any)
+        .eq("id", post.id);
+
       return NextResponse.json(
         {
           ok: true,
@@ -135,26 +138,30 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
       );
     }
 
-    const fullSave = await supabase
-      .from("posts")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .update({
-        status: "posted",
-        posted_at: result.postedAt,
-        published_at: result.postedAt,
-        error_message: null,
-      } as any)
-      .eq("id", post.id);
+    const fullSave = await updatePostWithRetry(supabase, post.id, {
+      status: "posted",
+      posted_at: result.postedAt,
+      error_message: null,
+    });
 
-    if (fullSave.error) {
+    if (!fullSave.ok) {
       console.error(
-        "[POSTS-API/retry] status update failed (non-fatal)",
-        fullSave.error,
+        "[POSTS-API/retry] status update failed after retries (non-fatal)",
+        { postId: post.id, tweetId: result.tweetId, lastError: fullSave.error },
       );
+      await supabase
+        .from("posts")
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .update({
+          error_message: `Post succeeded on X but DB status update failed after ${DB_UPDATE_MAX_RETRIES} retries: ${fullSave.error}`,
+          updated_at: new Date().toISOString(),
+        } as any)
+        .eq("id", post.id);
+
       return NextResponse.json(
         {
           ok: true,
-          warning: `投稿は成功しましたが、ステータス更新で軽微なエラー: ${fullSave.error.message}`,
+          warning: `投稿は成功しましたが、ステータス更新で軽微なエラーが発生しました。数分以内に自動修復されます。(${fullSave.error})`,
           tweet_id: result.tweetId,
           url: result.url,
         },

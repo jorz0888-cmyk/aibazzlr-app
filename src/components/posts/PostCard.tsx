@@ -1,12 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Spinner } from "@/components/Spinner";
 import { useToast } from "@/components/common/Toast";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { PostEditorModal } from "./PostEditorModal";
 import { PublishConfirmDialog } from "./PublishConfirmDialog";
 import type { PostListItem } from "./types";
+
+// stuck = publishing status held for more than this. The pg_cron cleanup job
+// runs at the same threshold (5 min), so this UI warning means
+// "the auto-recovery should kick in within the next minute or two".
+const PUBLISHING_STUCK_THRESHOLD_MS = 5 * 60 * 1000;
 
 function relTime(iso: string | null): string {
   if (!iso) return "—";
@@ -28,20 +34,37 @@ export function PostCard({ post }: { post: PostListItem }) {
   const toast = useToast();
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [busy, setBusy] = useState<null | "publish" | "delete" | "retry">(null);
   const [error, setError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const username = post.social_account?.username ?? "(unknown)";
   const platform = post.social_account?.platform ?? "x";
   const aiName = post.ai_config?.name ?? "(AI設定なし)";
   const aiMode = post.ai_config?.account_mode === "fictional" ? "🎭" : "🏪";
 
+  const deleteLabel =
+    post.status === "failed"
+      ? "この失敗投稿を削除しますか？"
+      : post.status === "cancelled"
+        ? "このキャンセル済み投稿を削除しますか？"
+        : "このドラフトを削除しますか？";
+
+  const isStuckPublishing =
+    post.status === "publishing" &&
+    Date.now() - new Date(post.updated_at).getTime() >
+      PUBLISHING_STUCK_THRESHOLD_MS;
+
   async function publish() {
     setBusy("publish");
     setError(null);
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const res = await fetch(`/api/posts/${post.id}/publish`, {
         method: "POST",
+        signal: controller.signal,
       });
       const body = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
@@ -71,14 +94,30 @@ export function PostCard({ post }: { post: PostListItem }) {
       });
       router.refresh();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "投稿に失敗しました";
-      setError(msg);
-      toast.error("投稿に失敗しました", {
-        description: msg,
-      });
+      // Distinguish user-initiated abort from genuine failure.
+      const aborted =
+        (e instanceof DOMException && e.name === "AbortError") ||
+        (e instanceof Error && e.name === "AbortError");
+      if (aborted) {
+        setConfirming(false);
+        toast.info("投稿処理を中断しました", {
+          description:
+            "X 側に送信されている可能性があります。一覧で状態を確認してください。",
+        });
+        router.refresh();
+      } else {
+        const msg = e instanceof Error ? e.message : "投稿に失敗しました";
+        setError(msg);
+        toast.error("投稿に失敗しました", { description: msg });
+      }
     } finally {
+      abortRef.current = null;
       setBusy(null);
     }
+  }
+
+  function abortPublish() {
+    abortRef.current?.abort();
   }
 
   async function retry() {
@@ -111,13 +150,6 @@ export function PostCard({ post }: { post: PostListItem }) {
   }
 
   async function remove() {
-    const label =
-      post.status === "failed"
-        ? "この失敗投稿を削除しますか？"
-        : post.status === "cancelled"
-          ? "このキャンセル済み投稿を削除しますか？"
-          : "このドラフトを削除しますか？";
-    if (!window.confirm(label)) return;
     setBusy("delete");
     try {
       const res = await fetch(`/api/posts/${post.id}`, { method: "DELETE" });
@@ -125,6 +157,7 @@ export function PostCard({ post }: { post: PostListItem }) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
+      setDeleteOpen(false);
       toast.info("投稿を削除しました");
       router.refresh();
     } catch (e) {
@@ -135,7 +168,6 @@ export function PostCard({ post }: { post: PostListItem }) {
     }
   }
 
-  // Status-specific styling
   const tone = (() => {
     switch (post.status) {
       case "posted":
@@ -157,7 +189,7 @@ export function PostCard({ post }: { post: PostListItem }) {
         return {
           border: "border-cyan/30",
           bg: "bg-cyan/5",
-          label: "投稿中",
+          label: "処理中",
           color: "text-cyan",
         };
       default:
@@ -190,6 +222,14 @@ export function PostCard({ post }: { post: PostListItem }) {
           </span>
           <span className="text-ink-subtle">·</span>
           <span className="text-xs text-cyan">@{username}</span>
+          {isStuckPublishing && (
+            <span
+              title="処理が停止している可能性があります。数分待つと自動回収されます。"
+              className="ml-1 inline-flex items-center gap-1 rounded-full border border-yellow-400/40 bg-yellow-400/10 px-2 py-0.5 font-mono text-[10px] tracking-widest text-yellow-300"
+            >
+              ⚠️ STUCK
+            </span>
+          )}
         </header>
 
         <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">
@@ -206,6 +246,25 @@ export function PostCard({ post }: { post: PostListItem }) {
                 {h}
               </span>
             ))}
+          </div>
+        )}
+
+        {post.status === "publishing" && (
+          <div className="rounded-lg border border-cyan/30 bg-cyan/5 p-3 text-xs text-cyan">
+            <span className="inline-flex items-center gap-2">
+              <Spinner size={14} />
+              <span>
+                X に送信中、または処理待機中です（最終更新:{" "}
+                {relTime(post.updated_at)}）
+              </span>
+            </span>
+            {isStuckPublishing && (
+              <div className="mt-1 text-yellow-300">
+                5 分以上停滞しています。自動回収ジョブが数分以内にこの投稿を
+                <code className="mx-1">posted</code> または
+                <code className="mx-1">failed</code> に倒します。
+              </div>
+            )}
           </div>
         )}
 
@@ -262,7 +321,7 @@ export function PostCard({ post }: { post: PostListItem }) {
               <button
                 type="button"
                 className="btn-secondary border-danger/30 text-danger hover:bg-danger/10"
-                onClick={remove}
+                onClick={() => setDeleteOpen(true)}
                 disabled={busy !== null}
               >
                 {busy === "delete" ? <Spinner size={14} /> : "削除"}
@@ -271,8 +330,6 @@ export function PostCard({ post }: { post: PostListItem }) {
           )}
           {post.status === "failed" && (
             <>
-              {/* 二重投稿防止: 既に platform_post_id が埋まっていれば
-                  X 側に投稿済 → 再試行ボタン自体を非表示。retry 上限超過も同様。 */}
               {!post.platform_post_id && (post.retry_count ?? 0) < 3 && (
                 <button
                   type="button"
@@ -291,7 +348,7 @@ export function PostCard({ post }: { post: PostListItem }) {
               <button
                 type="button"
                 className="btn-secondary border-danger/30 text-danger hover:bg-danger/10"
-                onClick={remove}
+                onClick={() => setDeleteOpen(true)}
                 disabled={busy !== null}
               >
                 {busy === "delete" ? <Spinner size={14} /> : "削除"}
@@ -299,12 +356,6 @@ export function PostCard({ post }: { post: PostListItem }) {
             </>
           )}
         </footer>
-        {/*
-          Cost / model info is intentionally hidden from the UI.
-          The data is still persisted in `generation_metadata` for monthly
-          cost tracking, anomaly detection, and the future Phase 9 "usage"
-          dashboard (incl. BYOK plans where re-display might be desired).
-        */}
       </article>
 
       <PostEditorModal
@@ -320,7 +371,18 @@ export function PostCard({ post }: { post: PostListItem }) {
         hashtags={post.hashtags ?? []}
         onCancel={() => setConfirming(false)}
         onConfirm={publish}
+        onAbort={abortPublish}
         loading={busy === "publish"}
+      />
+      <ConfirmDialog
+        open={deleteOpen}
+        title="投稿を削除"
+        description={deleteLabel}
+        confirmLabel="削除する"
+        destructive
+        loading={busy === "delete"}
+        onConfirm={remove}
+        onCancel={() => setDeleteOpen(false)}
       />
     </>
   );

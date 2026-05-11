@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Spinner } from "@/components/Spinner";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import type { SocialAccount } from "@/lib/supabase/types";
 
 const PLATFORM_META: Record<
@@ -43,6 +44,7 @@ export function SnsAccountCard({ account }: { account: SocialAccount }) {
     null | "disconnect" | "primary" | "reauth"
   >(null);
   const [error, setError] = useState<string | null>(null);
+  const [disconnectOpen, setDisconnectOpen] = useState(false);
 
   const meta = PLATFORM_META[account.platform];
 
@@ -62,12 +64,6 @@ export function SnsAccountCard({ account }: { account: SocialAccount }) {
 
   async function disconnect() {
     if (loading) return;
-    if (
-      !window.confirm(
-        `@${account.username} の連携を解除しますか？\n（再連携は再度認証が必要です）`,
-      )
-    )
-      return;
     setError(null);
     setLoading("disconnect");
     try {
@@ -85,6 +81,7 @@ export function SnsAccountCard({ account }: { account: SocialAccount }) {
           body.error ?? body.debug?.message ?? `HTTP ${res.status}`,
         );
       }
+      setDisconnectOpen(false);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "解除に失敗しました");
@@ -227,7 +224,7 @@ export function SnsAccountCard({ account }: { account: SocialAccount }) {
         )}
         <button
           type="button"
-          onClick={disconnect}
+          onClick={() => setDisconnectOpen(true)}
           disabled={loading !== null}
           className="btn-secondary border-danger/30 text-danger hover:bg-danger/10"
         >
@@ -238,6 +235,24 @@ export function SnsAccountCard({ account }: { account: SocialAccount }) {
       {error && (
         <div className="basis-full text-xs text-danger">{error}</div>
       )}
+
+      <ConfirmDialog
+        open={disconnectOpen}
+        title="連携を解除"
+        description={
+          <>
+            <span className="font-bold text-cyan">@{account.username}</span>{" "}
+            の連携を解除しますか？
+            <br />
+            再連携は再度 X での認証が必要です。
+          </>
+        }
+        confirmLabel="解除する"
+        destructive
+        loading={loading === "disconnect"}
+        onConfirm={disconnect}
+        onCancel={() => setDisconnectOpen(false)}
+      />
     </li>
   );
 }

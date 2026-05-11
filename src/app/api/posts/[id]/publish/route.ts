@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getPostById } from "@/lib/db/posts";
+import { updatePostWithRetry } from "@/lib/db/post-update";
 import { publishPostToX } from "@/lib/posts/publisher";
 import { extractDbError } from "@/lib/db/error";
 
@@ -8,6 +9,7 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const MAX_RETRY = 3;
+const DB_UPDATE_MAX_RETRIES = 3;
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -27,10 +29,7 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
   }
 
   // ─── GUARD 1a: already-posted check ─────────────────────────────────────
-  // platform_post_id が埋まっている = X 側で投稿成功済み。
-  // 何度押されても X に再送信しない (重複投稿の最終ライン)。
   if (post.platform_post_id) {
-    // Self-heal: status が posted じゃないなら直す
     if (post.status !== "posted" && post.status !== "published") {
       await supabase
         .from("posts")
@@ -65,10 +64,7 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
     );
   }
 
-  // ─── GUARD 1b: optimistic lock (atomic state transition) ───────────────
-  // status を draft|failed → publishing に「条件付き」で更新する。
-  // 同じ id に対する 2 つ目のリクエストは matching row が既に publishing
-  // になっているので 0 行更新になり、ここで弾ける。
+  // ─── GUARD 1b: optimistic lock ─────────────────────────────────────────
   const { data: lockedRows, error: lockError } = await supabase
     .from("posts")
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -101,30 +97,34 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
   const result = await publishPostToX(supabase, post, user.id);
 
   if (result.ok) {
-    // ─── GUARD 2: persist platform_post_id IMMEDIATELY ───────────────────
-    // X 側ではツイートが既に存在する。何が何でも platform_post_id だけは
-    // 保存して、以降の retry/publish が誤発火しないようにする。
-    const minimalSave = await supabase
-      .from("posts")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .update({
-        platform_post_id: result.tweetId,
-        platform_post_url: result.url,
-        external_post_id: result.tweetId,
-      } as any)
-      .eq("id", post.id);
+    // ─── GUARD 2: persist platform_post_id (retried) ─────────────────────
+    // If this fails after 3 tries, we still tell the user the post succeeded
+    // (X side has the tweet) and the cron cleanup (every 5 min) will
+    // eventually mark this row as posted once it sees platform_post_id.
+    const minimalSave = await updatePostWithRetry(supabase, post.id, {
+      platform_post_id: result.tweetId,
+      platform_post_url: result.url,
+      external_post_id: result.tweetId,
+    });
 
-    if (minimalSave.error) {
-      // ★ Critical: X に投稿は通ったが platform_post_id すら保存できなかった
+    if (!minimalSave.ok) {
       console.error(
-        "[POSTS-API/publish] CRITICAL: X posted but platform_post_id save failed",
-        {
-          postId: post.id,
-          tweetId: result.tweetId,
-          dbError: minimalSave.error,
-        },
+        "[POSTS-API/publish] CRITICAL: X posted but platform_post_id save failed after retries",
+        { postId: post.id, tweetId: result.tweetId, lastError: minimalSave.error },
       );
-      // それでもユーザーには成功を返す (X 側はツイート済なので)
+      // Best-effort: try to leave an audit trail in error_message even if
+      // we couldn't write platform_post_id. The cron cleanup will then
+      // *not* be able to promote this to posted (no platform_post_id), so
+      // it'll become failed with our message visible.
+      await supabase
+        .from("posts")
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .update({
+          error_message: `X 側で投稿成功 (tweet_id=${result.tweetId}) したが、DBへのID保存に失敗: ${minimalSave.error}`,
+          updated_at: new Date().toISOString(),
+        } as any)
+        .eq("id", post.id);
+
       return NextResponse.json(
         {
           ok: true,
@@ -138,32 +138,35 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
       );
     }
 
-    // ─── 続いて status / posted_at を更新 (非critical) ───────────────────
-    const fullSave = await supabase
-      .from("posts")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .update({
-        status: "posted",
-        posted_at: result.postedAt,
-        published_at: result.postedAt,
-        error_message: null,
-      } as any)
-      .eq("id", post.id);
+    // ─── status → posted (retried) ───────────────────────────────────────
+    const fullSave = await updatePostWithRetry(supabase, post.id, {
+      status: "posted",
+      posted_at: result.postedAt,
+      error_message: null,
+    });
 
-    if (fullSave.error) {
+    if (!fullSave.ok) {
       console.error(
-        "[POSTS-API/publish] status update failed (non-fatal)",
-        {
-          postId: post.id,
-          tweetId: result.tweetId,
-          dbError: fullSave.error,
-        },
+        "[POSTS-API/publish] status update failed after retries (non-fatal)",
+        { postId: post.id, tweetId: result.tweetId, lastError: fullSave.error },
       );
-      // platform_post_id は保存済なので二重投稿はあり得ない。
+      // Per spec: leave platform_post_id (already saved) intact, persist
+      // an error_message so the row is visible/auditable, keep status
+      // as 'publishing'. The pg_cron cleanup will see status=publishing
+      // + platform_post_id set + updated_at > 5min and promote to 'posted'.
+      await supabase
+        .from("posts")
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .update({
+          error_message: `Post succeeded on X but DB status update failed after ${DB_UPDATE_MAX_RETRIES} retries: ${fullSave.error}`,
+          updated_at: new Date().toISOString(),
+        } as any)
+        .eq("id", post.id);
+
       return NextResponse.json(
         {
           ok: true,
-          warning: `投稿は成功しましたが、ステータス更新で軽微なエラー: ${fullSave.error.message}`,
+          warning: `投稿は成功しましたが、ステータス更新で軽微なエラーが発生しました。数分以内に自動修復されます。(${fullSave.error})`,
           tweet_id: result.tweetId,
           url: result.url,
         },
@@ -179,7 +182,6 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
   }
 
   // ─── X API failure path ────────────────────────────────────────────────
-  // status を failed に戻して retry_count++。
   await supabase
     .from("posts")
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

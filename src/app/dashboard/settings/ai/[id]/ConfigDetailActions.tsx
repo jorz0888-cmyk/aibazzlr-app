@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Spinner } from "@/components/Spinner";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 export function ConfigDetailActions({
   configId,
@@ -15,6 +16,7 @@ export function ConfigDetailActions({
   const router = useRouter();
   const [loading, setLoading] = useState<null | "default" | "delete">(null);
   const [error, setError] = useState<string | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   async function setAsDefault() {
     if (loading) return;
@@ -37,7 +39,6 @@ export function ConfigDetailActions({
 
   async function remove() {
     if (loading) return;
-    if (!window.confirm("このAI設定を削除しますか？元に戻せません。")) return;
     setError(null);
     setLoading("delete");
     try {
@@ -45,6 +46,7 @@ export function ConfigDetailActions({
         method: "DELETE",
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setDeleteOpen(false);
       router.push("/dashboard/settings/ai");
       router.refresh();
     } catch (e) {
@@ -74,7 +76,7 @@ export function ConfigDetailActions({
         )}
         <button
           type="button"
-          onClick={remove}
+          onClick={() => setDeleteOpen(true)}
           disabled={loading !== null}
           className="btn-secondary border-danger/30 text-danger hover:bg-danger/10"
         >
@@ -82,6 +84,17 @@ export function ConfigDetailActions({
         </button>
       </div>
       {error && <div className="text-xs text-danger">{error}</div>}
+
+      <ConfirmDialog
+        open={deleteOpen}
+        title="AI設定を削除"
+        description="このAI設定を削除しますか？元に戻せません。"
+        confirmLabel="削除する"
+        destructive
+        loading={loading === "delete"}
+        onConfirm={remove}
+        onCancel={() => setDeleteOpen(false)}
+      />
     </div>
   );
 }

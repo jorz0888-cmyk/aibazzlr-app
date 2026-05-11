@@ -12,6 +12,7 @@ const STATUS_FILTERS: {
 }[] = [
   { key: "all", label: "すべて" },
   { key: "draft", label: "ドラフト" },
+  { key: "publishing", label: "処理中" },
   { key: "posted", label: "投稿済" },
   { key: "failed", label: "失敗" },
 ];
@@ -44,16 +45,18 @@ export function PostsManager({
 
   const grouped = useMemo(() => {
     const drafts: PostListItem[] = [];
+    const publishing: PostListItem[] = [];
     const posted: PostListItem[] = [];
     const failed: PostListItem[] = [];
     const others: PostListItem[] = [];
     for (const p of filtered) {
       if (p.status === "draft") drafts.push(p);
+      else if (p.status === "publishing") publishing.push(p);
       else if (p.status === "posted" || p.status === "published") posted.push(p);
       else if (p.status === "failed") failed.push(p);
       else others.push(p);
     }
-    return { drafts, posted, failed, others };
+    return { drafts, publishing, posted, failed, others };
   }, [filtered]);
 
   return (
@@ -117,6 +120,13 @@ export function PostsManager({
           {grouped.drafts.length > 0 && (
             <Group title="ドラフト" count={grouped.drafts.length}>
               {grouped.drafts.map((p) => (
+                <PostCard key={p.id} post={p} />
+              ))}
+            </Group>
+          )}
+          {grouped.publishing.length > 0 && (
+            <Group title="処理中" count={grouped.publishing.length}>
+              {grouped.publishing.map((p) => (
                 <PostCard key={p.id} post={p} />
               ))}
             </Group>
