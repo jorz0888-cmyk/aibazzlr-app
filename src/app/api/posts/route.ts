@@ -4,6 +4,7 @@ import { extractDbError } from "@/lib/db/error";
 import type { Post, PostStatus } from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 const VALID_STATUSES: PostStatus[] = [
   "pending",

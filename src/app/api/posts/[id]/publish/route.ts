@@ -6,7 +6,7 @@ import { publishPostToX } from "@/lib/posts/publisher";
 import { extractDbError } from "@/lib/db/error";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const MAX_RETRY = 3;
 const DB_UPDATE_MAX_RETRIES = 3;

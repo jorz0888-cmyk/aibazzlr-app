@@ -7,6 +7,7 @@ import {
 import { extractDbError } from "@/lib/db/error";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 type Ctx = { params: Promise<{ id: string }> };
 

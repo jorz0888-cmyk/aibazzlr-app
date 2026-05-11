@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
+export const maxDuration = 300;
+
 /**
  * OAuth + email-confirmation callback.
  * Supabase redirects here with `?code=...` after a successful auth flow.

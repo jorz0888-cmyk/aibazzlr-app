@@ -9,6 +9,7 @@ import { revokeToken } from "@/lib/oauth/x-client";
 import { extractDbError } from "@/lib/db/error";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();

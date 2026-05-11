@@ -13,6 +13,7 @@ import { syncPlatformIds } from "@/lib/db/social-accounts";
 import { extractDbError } from "@/lib/db/error";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 function redirectWithParams(
   base: URL,

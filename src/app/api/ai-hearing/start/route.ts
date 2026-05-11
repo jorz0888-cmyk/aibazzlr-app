@@ -7,6 +7,7 @@ import {
 } from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 /**
  * Build a user-facing error message that surfaces the actual Postgres / RLS

@@ -10,6 +10,7 @@ import {
 import { extractDbError } from "@/lib/db/error";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 function envOrError(): { ok: true; clientId: string; redirectUri: string } | { ok: false; error: string } {
   if (!process.env.X_CLIENT_ID) return { ok: false, error: "X_CLIENT_ID is not set" };

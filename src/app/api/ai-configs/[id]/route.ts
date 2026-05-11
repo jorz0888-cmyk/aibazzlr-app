@@ -42,6 +42,7 @@ const ARRAY_FIELDS = new Set<keyof AiConfigUpdate>([
 ]);
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 type Ctx = { params: Promise<{ id: string }> };
 

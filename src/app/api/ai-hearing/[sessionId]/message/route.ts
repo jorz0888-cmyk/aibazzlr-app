@@ -22,8 +22,8 @@ import {
 
 export const runtime = "nodejs";
 // Allow long-running streamed responses (Claude completion + DB write +
-// optional finalize). Default Hobby cap is 10s; bump to 60s.
-export const maxDuration = 60;
+// optional finalize). Vercel Pro raises the cap to 300s.
+export const maxDuration = 300;
 
 type Ctx = { params: Promise<{ sessionId: string }> };
 

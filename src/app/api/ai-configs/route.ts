@@ -7,6 +7,7 @@ import { toStringArray } from "@/lib/ai/normalize-extracted";
 import type { AiConfigInsert } from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
