@@ -6,6 +6,8 @@ import { extractDbError } from "@/lib/db/error";
 import { applyPostDefaults } from "@/lib/db/post-defaults";
 import { generatePostDraft } from "@/lib/posts/generator";
 import type { Platform } from "@/lib/supabase/types";
+import { checkRateLimit, rateLimitedResponse } from "@/lib/rate-limit";
+import { checkDailyQuota, quotaExceededResponse } from "@/lib/quota";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -18,6 +20,13 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  // Phase 7.5a: Rate limit + daily quota guards
+  const rateResult = await checkRateLimit(user.id);
+  if (!rateResult.success) return rateLimitedResponse(rateResult);
+
+  const quotaResult = await checkDailyQuota(user.id, "post");
+  if (!quotaResult.allowed) return quotaExceededResponse(quotaResult);
 
   const body = (await request.json().catch(() => ({}))) as {
     ai_config_id?: string;

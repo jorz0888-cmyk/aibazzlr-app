@@ -3,6 +3,12 @@ import { createClient } from "@/lib/supabase/server";
 import { getHearingSession } from "@/lib/db/ai-hearing-sessions";
 import { getAnthropic, HEARING_MODEL } from "@/lib/ai/anthropic";
 import { normalizeAccountMode, type AccountMode } from "@/lib/supabase/types";
+import { checkRateLimit, rateLimitedResponse } from "@/lib/rate-limit";
+import {
+  checkDailyQuota,
+  quotaExceededResponse,
+  recordQuotaUsage,
+} from "@/lib/quota";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -152,6 +158,14 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Phase 7.5a: Rate limit + daily quota guards. test_post quota uses
+  // Upstash counter since there is no test_posts table.
+  const rateResult = await checkRateLimit(user.id);
+  if (!rateResult.success) return rateLimitedResponse(rateResult);
+
+  const quotaResult = await checkDailyQuota(user.id, "test_post");
+  if (!quotaResult.allowed) return quotaExceededResponse(quotaResult);
+
   const session = await getHearingSession(supabase, sessionId);
   if (!session || session.user_id !== user.id) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -212,6 +226,9 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
       { status: 422 },
     );
   }
+
+  // Record successful generation toward the daily quota (Upstash counter).
+  await recordQuotaUsage(user.id, "test_post");
 
   return NextResponse.json({
     tweet: parsed.tweet.trim(),

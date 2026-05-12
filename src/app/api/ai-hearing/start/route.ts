@@ -5,6 +5,8 @@ import {
   normalizeAccountMode,
   type HearingMessage,
 } from "@/lib/supabase/types";
+import { checkRateLimit, rateLimitedResponse } from "@/lib/rate-limit";
+import { checkDailyQuota, quotaExceededResponse } from "@/lib/quota";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -61,6 +63,14 @@ export async function POST(request: NextRequest) {
       { status: 401 },
     );
   }
+
+  // 1a. Rate limit (short-burst protection via Upstash) -------------------
+  const rateResult = await checkRateLimit(user.id);
+  if (!rateResult.success) return rateLimitedResponse(rateResult);
+
+  // 1b. Daily quota (DB count of ai_hearing_sessions in last 24h) --------
+  const quotaResult = await checkDailyQuota(user.id, "hearing");
+  if (!quotaResult.allowed) return quotaExceededResponse(quotaResult);
 
   // 2. Body ----------------------------------------------------------------
   const body = (await request.json().catch(() => ({}))) as {
