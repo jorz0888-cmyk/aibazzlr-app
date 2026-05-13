@@ -358,11 +358,17 @@ export function PostCard({ post }: { post: PostListItem }) {
         </footer>
       </article>
 
-      <PostEditorModal
-        post={post}
-        open={editing}
-        onClose={() => setEditing(false)}
-      />
+      {/* Phase 7.5c: render only while open so every open is a fresh mount.
+          PostEditorModal's inner `if (!open) return null` does NOT unmount —
+          internal state (saving=true after a successful save) would leak
+          across cycles and disable the save button on reopen. */}
+      {editing && (
+        <PostEditorModal
+          post={post}
+          open={editing}
+          onClose={() => setEditing(false)}
+        />
+      )}
       <PublishConfirmDialog
         open={confirming}
         username={username}
