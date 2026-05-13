@@ -155,12 +155,19 @@ export function PostsManager({
         </div>
       )}
 
-      <PostGeneratorModal
-        open={genOpen}
-        onClose={() => setGenOpen(false)}
-        aiConfigs={aiConfigs}
-        socialAccounts={socialAccounts}
-      />
+      {/* Phase 7.5c: render only while open so every open is a fresh mount.
+          PostGeneratorModal's inner `if (!open) return null` does NOT unmount
+          the component — it just renders nothing — so internal state
+          (`loading=true` after a successful generate) leaked across cycles
+          and disabled the submit button on reopen until a hard refresh. */}
+      {genOpen && (
+        <PostGeneratorModal
+          open={genOpen}
+          onClose={() => setGenOpen(false)}
+          aiConfigs={aiConfigs}
+          socialAccounts={socialAccounts}
+        />
+      )}
     </>
   );
 }
