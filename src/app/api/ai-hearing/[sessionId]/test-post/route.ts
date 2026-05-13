@@ -187,7 +187,17 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
     resp = await anthropic.messages.create({
       model: HEARING_MODEL,
       max_tokens: 1500,
-      system: session.generated_system_prompt,
+      // Phase 7.5b: the generated system prompt is long and stable per session.
+      // Caching gives 90% off on input for repeated test-post generations.
+      // SDK 0.32 types lag the API.
+      system: [
+        {
+          type: "text",
+          text: session.generated_system_prompt,
+          cache_control: { type: "ephemeral" },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
+      ],
       messages: [
         {
           role: "user",
@@ -196,6 +206,15 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
           ),
         },
       ],
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const u = resp.usage as any;
+    console.log("[anthropic][cache] hearing/test-post", {
+      sessionId,
+      input: u?.input_tokens ?? 0,
+      cache_create: u?.cache_creation_input_tokens ?? 0,
+      cache_read: u?.cache_read_input_tokens ?? 0,
+      output: u?.output_tokens ?? 0,
     });
   } catch (e) {
     console.error("[test-post] anthropic call failed", e);

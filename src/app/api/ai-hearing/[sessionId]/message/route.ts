@@ -93,15 +93,38 @@ export async function POST(request: NextRequest, { params }: Ctx) {
         // seasonal_items, real_episodes, announcement_topics, etc.) so we
         // need significantly more headroom on the final turn.
         const maxTokens = sessionMode === "real" ? 8192 : 4096;
+        // Phase 7.5b: cache the long interviewer system prompt (>1024 tokens).
+        // Same prompt is reused for every turn of a session — cache hits start
+        // from turn 2 onward and cut input cost ~90% on the cached portion.
+        // SDK 0.32 types lag the API; cache_control is supported at runtime.
         const aiStream = anthropic.messages.stream({
           model: HEARING_MODEL,
           max_tokens: maxTokens,
-          system: interviewerPromptFor(sessionMode),
+          system: [
+            {
+              type: "text",
+              text: interviewerPromptFor(sessionMode),
+              cache_control: { type: "ephemeral" },
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            } as any,
+          ],
           messages: apiMessages,
         });
 
+        let cacheCreate = 0;
+        let cacheRead = 0;
+        let inputTokens = 0;
+        let outputTokens = 0;
         for await (const event of aiStream) {
-          if (
+          if (event.type === "message_start") {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const u = event.message.usage as any;
+            inputTokens = u.input_tokens ?? 0;
+            cacheCreate = u.cache_creation_input_tokens ?? 0;
+            cacheRead = u.cache_read_input_tokens ?? 0;
+          } else if (event.type === "message_delta") {
+            outputTokens = event.usage.output_tokens ?? 0;
+          } else if (
             event.type === "content_block_delta" &&
             event.delta.type === "text_delta"
           ) {
@@ -115,6 +138,13 @@ export async function POST(request: NextRequest, { params }: Ctx) {
           }
         }
         streamCompleted = true;
+        console.log("[anthropic][cache] hearing/message", {
+          sessionId,
+          input: inputTokens,
+          cache_create: cacheCreate,
+          cache_read: cacheRead,
+          output: outputTokens,
+        });
       } catch (e) {
         console.error("[hearing/message] anthropic stream error", e);
         try {

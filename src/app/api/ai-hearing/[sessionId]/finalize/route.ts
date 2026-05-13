@@ -316,12 +316,31 @@ export async function POST(request: NextRequest, { params }: Ctx) {
     const resp = await anthropic.messages.create({
       model: FINALIZE_MODEL,
       max_tokens: sessionMode === "real" ? 8192 : 4096,
-      system: interviewerPromptFor(sessionMode),
+      // Phase 7.5b: same interviewer prompt as /message — cache_control lets
+      // this call hit the same 5-min cache when finalize follows shortly after
+      // the last hearing turn. SDK 0.32 types lag the API.
+      system: [
+        {
+          type: "text",
+          text: interviewerPromptFor(sessionMode),
+          cache_control: { type: "ephemeral" },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
+      ],
       messages: apiMessages,
     });
     regenerateText = resp.content
       .map((c) => (c.type === "text" ? c.text : ""))
       .join("");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const u = resp.usage as any;
+    console.log("[anthropic][cache] hearing/finalize:regenerate", {
+      sessionId,
+      input: u?.input_tokens ?? 0,
+      cache_create: u?.cache_creation_input_tokens ?? 0,
+      cache_read: u?.cache_read_input_tokens ?? 0,
+      output: u?.output_tokens ?? 0,
+    });
     debugLog.attempts.push("regenerate");
   } catch (e) {
     console.error("[hearing/finalize] regenerate failed", e);

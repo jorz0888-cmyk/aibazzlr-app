@@ -170,7 +170,17 @@ export async function generatePostDraft(
     resp = await anthropic.messages.create({
       model: POST_MODEL,
       max_tokens: 1024,
-      system,
+      // Phase 7.5b: same per-AI-config system prompt is reused for every post
+      // generation. Caching lets back-to-back generations hit the 5-min cache
+      // for 90% off on input tokens. SDK 0.32 types lag the API.
+      system: [
+        {
+          type: "text",
+          text: system,
+          cache_control: { type: "ephemeral" },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
+      ],
       messages: [{ role: "user", content: user }],
     });
     attempts.push("anthropic_call");
@@ -205,11 +215,21 @@ export async function generatePostDraft(
   }
 
   // Calculate cost (USD)
-  const inputTokens = resp.usage?.input_tokens ?? 0;
-  const outputTokens = resp.usage?.output_tokens ?? 0;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const respUsage = resp.usage as any;
+  const inputTokens = respUsage?.input_tokens ?? 0;
+  const outputTokens = respUsage?.output_tokens ?? 0;
+  const cacheCreate = respUsage?.cache_creation_input_tokens ?? 0;
+  const cacheRead = respUsage?.cache_read_input_tokens ?? 0;
   const cost =
     (inputTokens / 1000) * POST_MODEL_PRICE.input +
     (outputTokens / 1000) * POST_MODEL_PRICE.output;
+  console.log("[anthropic][cache] posts/generate", {
+    input: inputTokens,
+    cache_create: cacheCreate,
+    cache_read: cacheRead,
+    output: outputTokens,
+  });
 
   const metadata: GenerationMetadata = {
     model: POST_MODEL,
