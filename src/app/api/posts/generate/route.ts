@@ -7,7 +7,10 @@ import { applyPostDefaults } from "@/lib/db/post-defaults";
 import { generatePostDraft } from "@/lib/posts/generator";
 import type { Platform } from "@/lib/supabase/types";
 import { checkRateLimit, rateLimitedResponse } from "@/lib/rate-limit";
-import { checkDailyQuota, quotaExceededResponse } from "@/lib/quota";
+import {
+  checkMonthlyPostQuota,
+  monthlyQuotaExceededResponse,
+} from "@/lib/quota";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -25,8 +28,9 @@ export async function POST(request: NextRequest) {
   const rateResult = await checkRateLimit(user.id);
   if (!rateResult.success) return rateLimitedResponse(rateResult);
 
-  const quotaResult = await checkDailyQuota(user.id, "post");
-  if (!quotaResult.allowed) return quotaExceededResponse(quotaResult);
+  // Phase 9: monthly post quota tied to plan (Free=10, Standard=150, Premium=450).
+  const quotaResult = await checkMonthlyPostQuota(user.id);
+  if (!quotaResult.allowed) return monthlyQuotaExceededResponse(quotaResult);
 
   const body = (await request.json().catch(() => ({}))) as {
     ai_config_id?: string;

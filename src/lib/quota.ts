@@ -1,47 +1,60 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getDailyCounter, incrementDailyCounter } from "@/lib/rate-limit";
+import { getPlanLimits, type Plan } from "@/lib/plans";
 
-export const QUOTAS = {
-  hearing: 3,
-  post: 30,
-  test_post: 10,
-} as const;
+// ---------------------------------------------------------------------------
+// Daily quotas (Phase 7.5a) — hearing + test_post are short-burst protections,
+// not the billing surface. They are plan-aware so paid users get more
+// per-day capacity. Post-publication monthly quota is handled separately by
+// `checkMonthlyPostQuota` since it ties to Stripe billing periods.
+// ---------------------------------------------------------------------------
 
-export type QuotaType = keyof typeof QUOTAS;
+export type DailyQuotaType = "hearing" | "test_post";
 
 export interface QuotaResult {
   allowed: boolean;
   current: number;
   limit: number;
   resetAt: Date;
-  quotaType: QuotaType;
+  quotaType: DailyQuotaType;
   source: "db" | "redis" | "fail_open";
+  plan: Plan;
 }
 
-const DB_TABLE: Record<Exclude<QuotaType, "test_post">, string> = {
-  hearing: "ai_hearing_sessions",
-  post: "posts",
-};
-
-// test_post has no persistence table — we count in Upstash Redis (24h TTL).
-// When Upstash is not configured we fail open, matching rate-limit behavior.
-
-function nextResetAt(): Date {
+function nextDailyResetAt(): Date {
   return new Date(Date.now() + 24 * 60 * 60 * 1000);
+}
+
+function dailyLimit(plan: Plan, quotaType: DailyQuotaType): number {
+  const limits = getPlanLimits(plan);
+  return quotaType === "hearing"
+    ? limits.hearings_per_day
+    : limits.test_posts_per_day;
+}
+
+async function getUserPlan(userId: string): Promise<Plan> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("profiles")
+    .select("plan")
+    .eq("id", userId)
+    .single();
+  const plan = (data?.plan ?? "free") as Plan;
+  return plan;
 }
 
 export async function checkDailyQuota(
   userId: string,
-  quotaType: QuotaType,
+  quotaType: DailyQuotaType,
 ): Promise<QuotaResult> {
-  const limit = QUOTAS[quotaType];
-  const resetAt = nextResetAt();
+  const plan = await getUserPlan(userId);
+  const limit = dailyLimit(plan, quotaType);
+  const resetAt = nextDailyResetAt();
 
   if (quotaType === "test_post") {
     const current = await getDailyCounter(`quota:test_post:${userId}`);
     if (current === null) {
-      // Upstash not configured — fail open
       return {
         allowed: true,
         current: 0,
@@ -49,6 +62,7 @@ export async function checkDailyQuota(
         resetAt,
         quotaType,
         source: "fail_open",
+        plan,
       };
     }
     return {
@@ -58,22 +72,22 @@ export async function checkDailyQuota(
       resetAt,
       quotaType,
       source: "redis",
+      plan,
     };
   }
 
-  const tableName = DB_TABLE[quotaType];
+  // hearing — count rows in ai_hearing_sessions over the last 24h
   const supabase = await createClient();
   const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
   const { count, error } = await supabase
-    .from(tableName)
+    .from("ai_hearing_sessions")
     .select("id", { count: "exact", head: true })
     .eq("user_id", userId)
     .gte("created_at", oneDayAgo);
 
   if (error) {
-    // Fail open on DB error — service continuity > strict quota
-    console.error("[quota] DB count failed", { quotaType, tableName, error });
+    console.error("[quota] DB count failed", { quotaType, error });
     return {
       allowed: true,
       current: 0,
@@ -81,6 +95,7 @@ export async function checkDailyQuota(
       resetAt,
       quotaType,
       source: "fail_open",
+      plan,
     };
   }
 
@@ -92,24 +107,20 @@ export async function checkDailyQuota(
     resetAt,
     quotaType,
     source: "db",
+    plan,
   };
 }
 
-/**
- * Increment the test_post counter after a successful generation.
- * No-op for db-backed quotas (the underlying row insert is the counter).
- */
 export async function recordQuotaUsage(
   userId: string,
-  quotaType: QuotaType,
+  quotaType: DailyQuotaType,
 ): Promise<void> {
   if (quotaType !== "test_post") return;
   await incrementDailyCounter(`quota:test_post:${userId}`);
 }
 
-const LABEL: Record<QuotaType, string> = {
+const DAILY_LABEL: Record<DailyQuotaType, string> = {
   hearing: "ヒアリング",
-  post: "投稿生成",
   test_post: "テスト投稿",
 };
 
@@ -117,12 +128,13 @@ export function quotaExceededResponse(result: QuotaResult): NextResponse {
   return NextResponse.json(
     {
       error: "daily_quota_exceeded",
-      message: `本日の${LABEL[result.quotaType]}回数の上限（${result.limit}回）に達しました。明日また使えるようになります。`,
+      message: `本日の${DAILY_LABEL[result.quotaType]}回数の上限（${result.limit}回）に達しました。明日また使えるようになります。`,
       details: {
         current: result.current,
         limit: result.limit,
         resetAt: result.resetAt.toISOString(),
         quotaType: result.quotaType,
+        plan: result.plan,
       },
     },
     {
@@ -135,5 +147,173 @@ export function quotaExceededResponse(result: QuotaResult): NextResponse {
         ).toString(),
       },
     },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Monthly post quota (Phase 9) — tied to Stripe billing period for paid
+// plans, falling back to calendar-month for free users.
+// ---------------------------------------------------------------------------
+
+export interface MonthlyPostQuotaResult {
+  allowed: boolean;
+  used: number;
+  limit: number;
+  remaining: number;
+  resetAt: Date;
+  periodStart: Date;
+  plan: Plan;
+}
+
+/**
+ * Determine the current quota window for a profile. For free users we use
+ * the calendar month (1日 0:00 〜 翌月1日 0:00). For paid users we use the
+ * subscription's current period as reported by Stripe (synced via webhook).
+ * If the period fields are missing (e.g. the webhook hasn't landed yet) we
+ * fall back to calendar month so the user is never blocked unfairly.
+ */
+function windowFor(
+  plan: Plan,
+  periodStart: string | null,
+  periodEnd: string | null,
+): { start: Date; end: Date } {
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+  if (plan === "free") {
+    return { start: monthStart, end: monthEnd };
+  }
+
+  const start = periodStart ? new Date(periodStart) : monthStart;
+  const end = periodEnd ? new Date(periodEnd) : monthEnd;
+  return { start, end };
+}
+
+export async function checkMonthlyPostQuota(
+  userId: string,
+): Promise<MonthlyPostQuotaResult> {
+  const supabase = await createClient();
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("plan, current_period_start, current_period_end")
+    .eq("id", userId)
+    .single();
+
+  const plan = (profile?.plan ?? "free") as Plan;
+  const limit = getPlanLimits(plan).posts_per_month;
+  const { start, end } = windowFor(
+    plan,
+    profile?.current_period_start ?? null,
+    profile?.current_period_end ?? null,
+  );
+
+  // Count posts that consumed (or are consuming) a generation slot in the
+  // current window. We count drafts too — every generate call costs a Claude
+  // request, and limiting only on `posted` would let a single user spam
+  // generation with status='draft'.
+  const { count } = await supabase
+    .from("posts")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .gte("created_at", start.toISOString())
+    .lt("created_at", end.toISOString());
+
+  const used = count ?? 0;
+  const remaining = Math.max(0, limit - used);
+
+  return {
+    allowed: used < limit,
+    used,
+    limit,
+    remaining,
+    resetAt: end,
+    periodStart: start,
+    plan,
+  };
+}
+
+export function monthlyQuotaExceededResponse(
+  result: MonthlyPostQuotaResult,
+): NextResponse {
+  return NextResponse.json(
+    {
+      error: "monthly_post_quota_exceeded",
+      message: `今月の投稿生成上限（${result.limit}件）に達しました。プランをアップグレードするか、来月のリセットをお待ちください。`,
+      details: {
+        used: result.used,
+        limit: result.limit,
+        remaining: 0,
+        resetAt: result.resetAt.toISOString(),
+        plan: result.plan,
+      },
+    },
+    {
+      status: 429,
+      headers: {
+        "X-RateLimit-Limit": result.limit.toString(),
+        "X-RateLimit-Remaining": "0",
+        "X-RateLimit-Reset": Math.floor(
+          result.resetAt.getTime() / 1000,
+        ).toString(),
+      },
+    },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// AI config count quota — checked at config creation time.
+// ---------------------------------------------------------------------------
+
+export interface AiConfigQuotaResult {
+  allowed: boolean;
+  current: number;
+  limit: number;
+  plan: Plan;
+}
+
+export async function checkAiConfigQuota(
+  userId: string,
+): Promise<AiConfigQuotaResult> {
+  const supabase = await createClient();
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("plan")
+    .eq("id", userId)
+    .single();
+
+  const plan = (profile?.plan ?? "free") as Plan;
+  const limit = getPlanLimits(plan).ai_configs_max;
+
+  const { count } = await supabase
+    .from("ai_configs")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId);
+
+  const current = count ?? 0;
+  return {
+    allowed: current < limit,
+    current,
+    limit,
+    plan,
+  };
+}
+
+export function aiConfigQuotaExceededResponse(
+  result: AiConfigQuotaResult,
+): NextResponse {
+  const planLabel = result.plan === "free" ? "Standard" : "Premium";
+  return NextResponse.json(
+    {
+      error: "ai_config_quota_exceeded",
+      message: `現在のプランでは AI設定を ${result.limit} 個まで作成できます。${planLabel} プランにアップグレードすると上限を引き上げできます。`,
+      details: {
+        current: result.current,
+        limit: result.limit,
+        plan: result.plan,
+      },
+    },
+    { status: 403 },
   );
 }

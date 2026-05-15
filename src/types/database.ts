@@ -7,7 +7,7 @@ export type Profile = {
   id: string;
   email: string;
   name: string | null;
-  plan: "free" | "starter" | "pro";
+  plan: "free" | "standard" | "premium";
   created_at: string;
   updated_at: string;
 };

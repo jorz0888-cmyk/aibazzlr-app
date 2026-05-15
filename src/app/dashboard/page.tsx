@@ -3,6 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { listSocialAccountsByUser } from "@/lib/db/social-accounts";
 import { listAiConfigsByUser } from "@/lib/db/ai-configs";
 import { countPostsByUser } from "@/lib/db/posts";
+import { checkMonthlyPostQuota } from "@/lib/quota";
+import { PLAN_DISPLAY_NAMES } from "@/lib/plans";
 
 export const dynamic = "force-dynamic";
 
@@ -15,10 +17,11 @@ export default async function DashboardHome() {
 
   // Fetch dashboard stats with isolated failures so a single bad query
   // doesn't crash the whole landing page.
-  const [snsRes, configsRes, postsCountRes] = await Promise.allSettled([
+  const [snsRes, configsRes, postsCountRes, quotaRes] = await Promise.allSettled([
     listSocialAccountsByUser(supabase, user.id),
     listAiConfigsByUser(supabase, user.id),
-    countPostsByUser(supabase, user.id, "published"),
+    countPostsByUser(supabase, user.id, "posted"),
+    checkMonthlyPostQuota(user.id),
   ]);
 
   const snsCount =
@@ -27,6 +30,8 @@ export default async function DashboardHome() {
     configsRes.status === "fulfilled" ? configsRes.value.length : 0;
   const publishedThisMonth =
     postsCountRes.status === "fulfilled" ? postsCountRes.value : 0;
+  const quota =
+    quotaRes.status === "fulfilled" ? quotaRes.value : null;
 
   const hasSns = snsCount > 0;
   const hasAiConfig = configsCount > 0;
@@ -52,6 +57,33 @@ export default async function DashboardHome() {
         <Stat label="今月の自動投稿" value={publishedThisMonth} unit="件" />
       </div>
 
+      {quota && (
+        <div className="card p-6">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="font-mono text-[10px] tracking-[0.2em] text-ink-muted">
+                CURRENT PLAN · {PLAN_DISPLAY_NAMES[quota.plan].toUpperCase()}
+              </p>
+              <h2 className="mt-1 text-base font-bold text-ink">
+                今期の投稿生成: {quota.used} / {quota.limit}
+              </h2>
+              <p className="mt-1 text-xs text-ink-subtle">
+                次回リセット: {quota.resetAt.toLocaleDateString("ja-JP")}
+              </p>
+            </div>
+            <Link href="/dashboard/billing" className="link-cyan text-sm">
+              プランを見る →
+            </Link>
+          </div>
+          <UsageBar value={quota.used} max={quota.limit} />
+          {quota.remaining <= Math.ceil(quota.limit * 0.1) && (
+            <p className="mt-3 text-xs text-warning">
+              残り {quota.remaining} 件です。アップグレードで上限を引き上げできます。
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="card p-6">
         <h2 className="text-base font-bold text-ink">次のステップ</h2>
         <ol className="mt-4 space-y-3 text-sm">
@@ -72,6 +104,21 @@ export default async function DashboardHome() {
           </Step>
         </ol>
       </div>
+    </div>
+  );
+}
+
+function UsageBar({ value, max }: { value: number; max: number }) {
+  const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
+  const danger = pct >= 90;
+  const warn = pct >= 75 && !danger;
+  const color = danger ? "bg-danger" : warn ? "bg-warning" : "bg-cyan";
+  return (
+    <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-white/5">
+      <div
+        className={`h-full ${color} transition-all`}
+        style={{ width: `${pct}%` }}
+      />
     </div>
   );
 }

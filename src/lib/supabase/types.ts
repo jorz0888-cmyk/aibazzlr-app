@@ -25,7 +25,16 @@ export type PostStatus =
   | "failed"
   | "cancelled";
 
-export type Plan = "free" | "starter" | "pro";
+export type Plan = "free" | "standard" | "premium";
+
+export type SubscriptionStatus =
+  | "active"
+  | "canceled"
+  | "past_due"
+  | "unpaid"
+  | "incomplete"
+  | "incomplete_expired"
+  | "trialing";
 
 /** Account mode — separates real businesses from fictional/persona brands. */
 export type AccountMode = "real" | "fictional";
@@ -43,6 +52,14 @@ export type Profile = {
   email: string;
   name: string | null;
   plan: Plan;
+  // Phase 9: Stripe billing columns
+  stripe_customer_id: string | null;
+  subscription_id: string | null;
+  subscription_status: SubscriptionStatus | null;
+  current_period_start: string | null;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+  canceled_at: string | null;
   created_at: string;
   updated_at: string;
 };

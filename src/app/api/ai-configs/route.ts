@@ -5,6 +5,10 @@ import { applyAiConfigDefaults } from "@/lib/db/ai-config-defaults";
 import { extractDbError } from "@/lib/db/error";
 import { toStringArray } from "@/lib/ai/normalize-extracted";
 import type { AiConfigInsert } from "@/lib/supabase/types";
+import {
+  checkAiConfigQuota,
+  aiConfigQuotaExceededResponse,
+} from "@/lib/quota";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -17,6 +21,10 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  // Phase 9: enforce plan-based AI-config limit (Free=1, Standard=3, Premium=∞).
+  const quota = await checkAiConfigQuota(user.id);
+  if (!quota.allowed) return aiConfigQuotaExceededResponse(quota);
 
   const body = await request.json().catch(() => ({}));
   const name = (body.name ?? "").trim();
