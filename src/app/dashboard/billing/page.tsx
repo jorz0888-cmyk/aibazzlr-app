@@ -16,7 +16,11 @@ const PLANS: Plan[] = ["free", "standard", "premium"];
 export default async function BillingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ success?: string; canceled?: string }>;
+  searchParams: Promise<{
+    success?: string;
+    canceled?: string;
+    upgraded?: string;
+  }>;
 }) {
   const params = await searchParams;
   const supabase = await createClient();
@@ -66,6 +70,12 @@ export default async function BillingPage({
       {params.canceled === "true" && (
         <div className="card border-line-strong bg-white/5 p-4 text-sm text-ink-muted">
           チェックアウトをキャンセルしました。
+        </div>
+      )}
+      {params.upgraded === "true" && (
+        <div className="card border-success/40 bg-success/10 p-4 text-sm text-success">
+          プランを変更しました。差額は日割りで計算され、次回請求に反映されます。
+          反映には数秒かかる場合があります。
         </div>
       )}
 
@@ -133,6 +143,7 @@ export default async function BillingPage({
             key={plan}
             plan={plan}
             current={currentPlan === plan}
+            currentPlan={currentPlan}
             cancelAtPeriodEnd={cancelAtPeriodEnd}
           />
         ))}
@@ -160,10 +171,12 @@ export default async function BillingPage({
 function PlanCard({
   plan,
   current,
+  currentPlan,
   cancelAtPeriodEnd,
 }: {
   plan: Plan;
   current: boolean;
+  currentPlan: Plan;
   cancelAtPeriodEnd: boolean;
 }) {
   return (
@@ -202,20 +215,24 @@ function PlanCard({
         ))}
       </ul>
       <div className="mt-5">
-        <PlanCta plan={plan} current={current} />
+        <PlanCta plan={plan} current={current} currentPlan={currentPlan} />
       </div>
     </article>
   );
 }
 
-function PlanCta({ plan, current }: { plan: Plan; current: boolean }) {
+function PlanCta({
+  plan,
+  current,
+  currentPlan,
+}: {
+  plan: Plan;
+  current: boolean;
+  currentPlan: Plan;
+}) {
   if (current) {
     return (
-      <button
-        type="button"
-        className="btn-secondary w-full"
-        disabled
-      >
+      <button type="button" className="btn-secondary w-full" disabled>
         現在のプラン
       </button>
     );
@@ -223,11 +240,11 @@ function PlanCta({ plan, current }: { plan: Plan; current: boolean }) {
   if (plan === "free") {
     return (
       <p className="text-xs text-ink-subtle">
-        ダウングレードはカスタマーポータルからの解約で行えます。
+        Free へのダウングレードはカスタマーポータルからの解約で行えます。
       </p>
     );
   }
-  return <UpgradeButton plan={plan} />;
+  return <UpgradeButton plan={plan} currentPlan={currentPlan} />;
 }
 
 function Bar({ value, max }: { value: number; max: number }) {

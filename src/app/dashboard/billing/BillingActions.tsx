@@ -17,25 +17,48 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
   return data;
 }
 
-export function UpgradeButton({ plan }: { plan: Plan }) {
+export function UpgradeButton({
+  plan,
+  currentPlan,
+}: {
+  plan: Plan;
+  /**
+   * The user's current plan. When set to a paid plan we update the existing
+   * Stripe subscription in place (proration) instead of opening Checkout —
+   * otherwise the user would end up with two active subscriptions billing
+   * in parallel.
+   */
+  currentPlan: Plan;
+}) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const isPaidToPaidSwitch =
+    currentPlan === "standard" || currentPlan === "premium";
+  const isDowngrade =
+    currentPlan === "premium" && plan === "standard";
 
   async function go() {
     setErr(null);
     setLoading(true);
     try {
-      const { url } = await postJson<{ url: string }>(
-        "/api/stripe/create-checkout-session",
-        { plan },
-      );
-      if (!url) throw new Error("Checkout URL was not returned");
+      const endpoint = isPaidToPaidSwitch
+        ? "/api/stripe/change-subscription"
+        : "/api/stripe/create-checkout-session";
+      const { url } = await postJson<{ url: string }>(endpoint, { plan });
+      if (!url) throw new Error("URL was not returned");
       window.location.href = url;
     } catch (e) {
       setErr(e instanceof Error ? e.message : "エラーが発生しました");
       setLoading(false);
     }
   }
+
+  const label = isPaidToPaidSwitch
+    ? isDowngrade
+      ? "このプランに変更（ダウングレード）"
+      : "このプランにアップグレード"
+    : "このプランにアップグレード";
 
   return (
     <div className="space-y-2">
@@ -45,8 +68,13 @@ export function UpgradeButton({ plan }: { plan: Plan }) {
         onClick={go}
         disabled={loading}
       >
-        {loading ? <Spinner /> : "このプランにアップグレード"}
+        {loading ? <Spinner /> : label}
       </button>
+      {isPaidToPaidSwitch && (
+        <p className="text-[11px] text-ink-subtle">
+          既存サブスクリプションを差額計算（日割り）で切り替えます。
+        </p>
+      )}
       {err && <p className="text-xs text-danger">{err}</p>}
     </div>
   );
