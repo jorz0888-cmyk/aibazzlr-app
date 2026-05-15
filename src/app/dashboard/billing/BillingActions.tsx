@@ -80,20 +80,11 @@ export function UpgradeButton({
   );
 }
 
-export function BillingActions({
-  currentPlan,
-  subscriptionStatus,
-}: {
-  currentPlan: Plan;
-  subscriptionStatus: string | null;
-}) {
+function usePortal() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const hasSubscription =
-    currentPlan !== "free" || subscriptionStatus === "canceled";
-
-  async function openPortal() {
+  async function open() {
     setErr(null);
     setLoading(true);
     try {
@@ -108,6 +99,21 @@ export function BillingActions({
     }
   }
 
+  return { loading, err, open };
+}
+
+export function BillingActions({
+  currentPlan,
+  subscriptionStatus,
+}: {
+  currentPlan: Plan;
+  subscriptionStatus: string | null;
+}) {
+  const { loading, err, open } = usePortal();
+
+  const hasSubscription =
+    currentPlan !== "free" || subscriptionStatus === "canceled";
+
   if (!hasSubscription) {
     return (
       <p className="mt-3 text-xs text-ink-subtle">
@@ -121,11 +127,38 @@ export function BillingActions({
       <button
         type="button"
         className="btn-secondary"
-        onClick={openPortal}
+        onClick={open}
         disabled={loading}
       >
         {loading ? <Spinner /> : "カスタマーポータルを開く"}
       </button>
+      {err && <p className="text-xs text-danger">{err}</p>}
+    </div>
+  );
+}
+
+/**
+ * "Downgrade to Free" CTA shown on the Free plan card when the user is on a
+ * paid plan. Routes to the Stripe customer portal — Stripe's own cancel flow
+ * handles confirmation, end-of-period scheduling, and the change-of-mind
+ * reactivation path. Webhook reconciles `plan='free'` when the subscription
+ * is fully canceled at period end.
+ */
+export function DowngradeToFreeButton() {
+  const { loading, err, open } = usePortal();
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        className="btn-secondary w-full"
+        onClick={open}
+        disabled={loading}
+      >
+        {loading ? <Spinner /> : "カスタマーポータルで解約"}
+      </button>
+      <p className="text-[11px] text-ink-subtle">
+        解約後も当該期間の末日まで現在のプランをご利用いただけます。
+      </p>
       {err && <p className="text-xs text-danger">{err}</p>}
     </div>
   );

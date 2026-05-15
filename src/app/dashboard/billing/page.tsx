@@ -7,7 +7,11 @@ import {
   type Plan,
 } from "@/lib/plans";
 import { checkMonthlyPostQuota, checkAiConfigQuota } from "@/lib/quota";
-import { BillingActions, UpgradeButton } from "./BillingActions";
+import {
+  BillingActions,
+  DowngradeToFreeButton,
+  UpgradeButton,
+} from "./BillingActions";
 
 export const dynamic = "force-dynamic";
 
@@ -238,11 +242,7 @@ function PlanCta({
     );
   }
   if (plan === "free") {
-    return (
-      <p className="text-xs text-ink-subtle">
-        Free へのダウングレードはカスタマーポータルからの解約で行えます。
-      </p>
-    );
+    return <DowngradeToFreeButton />;
   }
   return <UpgradeButton plan={plan} currentPlan={currentPlan} />;
 }
