@@ -42,6 +42,20 @@ export function planFromPriceId(
   return null;
 }
 
+// Rank used to detect upgrades vs downgrades when switching subscriptions.
+const PLAN_RANK = { free: 0, standard: 1, premium: 2 } as const;
+
+export function comparePlans(
+  fromPriceId: string | null | undefined,
+  toPriceId: string | null | undefined,
+): "upgrade" | "downgrade" | "same" {
+  const from = planFromPriceId(fromPriceId) ?? "free";
+  const to = planFromPriceId(toPriceId) ?? "free";
+  if (PLAN_RANK[to] > PLAN_RANK[from]) return "upgrade";
+  if (PLAN_RANK[to] < PLAN_RANK[from]) return "downgrade";
+  return "same";
+}
+
 /**
  * In Stripe API 2025+ / SDK 22+, the billing-cycle anchor fields
  * (`current_period_start`, `current_period_end`) live on the subscription

@@ -4,6 +4,7 @@ import {
   stripe,
   STRIPE_PRICE_IDS,
   siteUrl,
+  comparePlans,
   type PaidPlan,
 } from "@/lib/stripe";
 
@@ -85,6 +86,7 @@ export async function POST(request: NextRequest) {
     }
 
     const itemId = subscription.items.data[0]?.id;
+    const currentPriceId = subscription.items.data[0]?.price?.id ?? null;
     if (!itemId) {
       return NextResponse.json(
         { error: "サブスクリプション項目が取得できませんでした" },
@@ -92,9 +94,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Phase 9.1: charge upgrades immediately so the user sees the prorated
+    // amount on the same card transaction. Downgrades stay on
+    // `create_prorations` so the unused portion of the higher plan becomes
+    // a credit applied to the next regular invoice — industry standard,
+    // avoids triggering a refund-to-card flow.
+    const direction = comparePlans(currentPriceId, targetPrice);
+    const prorationBehavior: "always_invoice" | "create_prorations" =
+      direction === "upgrade" ? "always_invoice" : "create_prorations";
+
     await stripe.subscriptions.update(profile.subscription_id, {
       items: [{ id: itemId, price: targetPrice }],
-      proration_behavior: "create_prorations",
+      proration_behavior: prorationBehavior,
       // Re-activate if the user had scheduled a cancellation; otherwise leave
       // the flag alone (cancel_at_period_end defaults to its existing value).
       cancel_at_period_end: false,
