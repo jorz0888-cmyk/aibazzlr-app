@@ -175,10 +175,10 @@ function ChangePlanConfirm({
       onClick={submitting ? undefined : onCancel}
     >
       <div
-        className="card w-full max-w-md overflow-hidden p-0"
+        className="card flex max-h-[95vh] w-full max-w-md flex-col overflow-hidden p-0 sm:max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="border-b border-line p-5">
+        <header className="shrink-0 border-b border-line p-5">
           <p className="font-mono text-[11px] tracking-[0.25em] text-cyan">
             ── {isDowngrade ? "DOWNGRADE" : "UPGRADE"}
           </p>
@@ -191,7 +191,7 @@ function ChangePlanConfirm({
           </p>
         </header>
 
-        <div className="space-y-4 p-5 text-sm">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5 text-sm">
           {state.state === "loading" && (
             <div className="grid place-items-center py-6">
               <Spinner />
@@ -250,7 +250,7 @@ function ChangePlanConfirm({
           )}
         </div>
 
-        <footer className="flex flex-col-reverse gap-2 border-t border-line p-4 sm:flex-row sm:justify-end">
+        <footer className="flex shrink-0 flex-col-reverse gap-2 border-t border-line bg-bg-surface/95 p-4 backdrop-blur sm:flex-row sm:justify-end">
           <button
             type="button"
             className="btn-secondary"
