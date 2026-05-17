@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Spinner } from "@/components/Spinner";
 import { PLAN_DISPLAY_NAMES, PLAN_PRICES, type Plan } from "@/lib/plans";
 
@@ -169,13 +170,37 @@ function ChangePlanConfirm({
   onCancel: () => void;
 }) {
   const targetMonthly = PLAN_PRICES[plan].amount;
-  return (
+
+  // Render into document.body so the modal escapes any ancestor stacking
+  // context (the .card sections on this page each have backdrop-blur, which
+  // create a stacking context that would otherwise cap our z-index).
+  // Also lock body scroll + bind ESC while the modal is mounted.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !submitting) onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onCancel, submitting]);
+
+  if (!mounted) return null;
+
+  const modal = (
     <div
-      className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur sm:p-6"
+      className="fixed inset-0 z-[100] grid place-items-center bg-black/70 p-4 sm:p-6"
       onClick={submitting ? undefined : onCancel}
     >
       <div
-        className="card flex max-h-[95vh] w-full max-w-md flex-col overflow-hidden p-0 sm:max-h-[90vh]"
+        // bg-bg-surface (solid) instead of .card's bg-bg-surface/60 so the
+        // section underneath does not bleed through the modal panel.
+        className="flex max-h-[95vh] w-full max-w-md flex-col overflow-hidden rounded-xl border border-line bg-bg-surface text-ink shadow-2xl sm:max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="shrink-0 border-b border-line p-5">
@@ -277,6 +302,8 @@ function ChangePlanConfirm({
       </div>
     </div>
   );
+
+  return createPortal(modal, document.body);
 }
 
 function Row({
