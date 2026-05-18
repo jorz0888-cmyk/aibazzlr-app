@@ -17,6 +17,9 @@ export type SocialAccountStatus =
 export type PostStatus =
   | "pending"
   | "draft"
+  | "pending_approval"
+  | "approved"
+  | "rejected"
   | "queued"
   | "scheduled"
   | "publishing"
@@ -24,6 +27,33 @@ export type PostStatus =
   | "published"
   | "failed"
   | "cancelled";
+
+export type PostingMode = "auto" | "approval";
+export type TriggeredBy = "manual" | "schedule";
+
+export type Schedule = {
+  id: string;
+  ai_config_id: string;
+  user_id: string;
+  hour: number;
+  minute: number;
+  weekdays: number[];
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ScheduleInsert = Partial<
+  Omit<Schedule, "id" | "created_at" | "updated_at">
+> & {
+  ai_config_id: string;
+  user_id: string;
+  hour: number;
+};
+
+export type ScheduleUpdate = Partial<
+  Omit<Schedule, "id" | "ai_config_id" | "user_id" | "created_at" | "updated_at">
+>;
 
 export type Plan = "free" | "standard" | "premium";
 
@@ -145,6 +175,9 @@ export type AiConfig = {
   seasonal_items: string[];
   real_episodes: string[];
   announcement_topics: string[];
+  // -- Phase 11: auto-post --
+  posting_mode: PostingMode;
+  auto_post_enabled: boolean;
   // ----------------------------------------------
   created_at: string;
   updated_at: string;
@@ -194,6 +227,10 @@ export type Post = {
   approved_by: string | null;
   approved_at: string | null;
   rejection_reason: string | null;
+  // Phase 11: auto-post linkage
+  triggered_by: TriggeredBy;
+  schedule_id: string | null;
+  approval_token: string | null;
   // Legacy column (kept for back-compat)
   external_post_id: string | null;
   /** All engagement metrics live in this jsonb (likes/retweets/etc). */
@@ -354,6 +391,12 @@ export type Database = {
         Row: AiHearingSession;
         Insert: AiHearingSessionInsert;
         Update: AiHearingSessionUpdate;
+        Relationships: [];
+      };
+      schedules: {
+        Row: Schedule;
+        Insert: ScheduleInsert;
+        Update: ScheduleUpdate;
         Relationships: [];
       };
       oauth_sessions: {

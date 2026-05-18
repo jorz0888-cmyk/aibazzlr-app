@@ -10,6 +10,7 @@ import {
   EditableTextarea,
 } from "@/components/config/editable";
 import { ConfigDetailActions } from "./ConfigDetailActions";
+import { AutoPostSection } from "./AutoPostSection";
 
 export const dynamic = "force-dynamic";
 
@@ -267,6 +268,12 @@ export default async function ConfigDetailPage({
           max={10}
         />
       </Card>
+
+      <AutoPostSection
+        aiConfigId={config.id}
+        initialPostingMode={config.posting_mode}
+        initialAutoPostEnabled={config.auto_post_enabled}
+      />
 
       <Card title="生成されたシステムプロンプト">
         <EditableTextarea

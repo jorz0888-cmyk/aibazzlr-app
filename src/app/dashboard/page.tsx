@@ -5,6 +5,7 @@ import { listAiConfigsByUser } from "@/lib/db/ai-configs";
 import { countPostsByUser } from "@/lib/db/posts";
 import { checkMonthlyPostQuota } from "@/lib/quota";
 import { PLAN_DISPLAY_NAMES } from "@/lib/plans";
+import { AutoPostTimeline } from "./AutoPostTimeline";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +57,8 @@ export default async function DashboardHome() {
         <Stat label="AI設定" value={configsCount} unit="件" />
         <Stat label="今月の自動投稿" value={publishedThisMonth} unit="件" />
       </div>
+
+      <AutoPostTimeline userId={user.id} />
 
       {quota && (
         <div className="card p-6">

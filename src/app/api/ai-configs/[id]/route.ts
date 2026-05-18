@@ -100,6 +100,9 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     "seasonal_items",
     "real_episodes",
     "announcement_topics",
+    // Phase 11 auto-post
+    "posting_mode",
+    "auto_post_enabled",
   ];
   for (const key of passthrough) {
     if (key in body) {
