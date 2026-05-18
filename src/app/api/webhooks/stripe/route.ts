@@ -1,100 +1,14 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type Stripe from "stripe";
-import {
-  stripe,
-  planFromPriceId,
-  getCurrentPeriod,
-} from "@/lib/stripe";
+import { stripe } from "@/lib/stripe";
 import { createAdminClient } from "@/lib/supabase/server";
-import type { Plan, SubscriptionStatus } from "@/lib/supabase/types";
+import { syncSubscriptionToProfile } from "@/lib/billing/sync";
 
 export const runtime = "nodejs";
 // Stripe signs raw body — disable Next's built-in body parsing assumptions.
 export const dynamic = "force-dynamic";
 
 const WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
-
-type ProfileUpdate = {
-  plan?: Plan;
-  subscription_id?: string | null;
-  subscription_status?: SubscriptionStatus | null;
-  current_period_start?: string | null;
-  current_period_end?: string | null;
-  cancel_at_period_end?: boolean;
-  canceled_at?: string | null;
-  stripe_customer_id?: string;
-};
-
-function isKnownStatus(s: string): s is SubscriptionStatus {
-  return [
-    "active",
-    "canceled",
-    "past_due",
-    "unpaid",
-    "incomplete",
-    "incomplete_expired",
-    "trialing",
-  ].includes(s);
-}
-
-async function applySubscriptionToProfile(
-  subscription: Stripe.Subscription,
-  fallbackUserId: string | null,
-) {
-  const admin = createAdminClient();
-
-  const priceId = subscription.items?.data?.[0]?.price?.id ?? null;
-  const plan: Plan = planFromPriceId(priceId) ?? "free";
-  const { start, end } = getCurrentPeriod(subscription);
-  const status: SubscriptionStatus | null = isKnownStatus(subscription.status)
-    ? subscription.status
-    : null;
-
-  const update: ProfileUpdate = {
-    plan,
-    subscription_id: subscription.id,
-    subscription_status: status,
-    current_period_start: start ? start.toISOString() : null,
-    current_period_end: end ? end.toISOString() : null,
-    cancel_at_period_end: subscription.cancel_at_period_end ?? false,
-    canceled_at: subscription.canceled_at
-      ? new Date(subscription.canceled_at * 1000).toISOString()
-      : null,
-  };
-
-  // Try by subscription_id first, then fall back to metadata user_id (covers
-  // the very first checkout when subscription_id hasn't been stored yet).
-  const { data: bySub, error: bySubErr } = await admin
-    .from("profiles")
-    .update(update)
-    .eq("subscription_id", subscription.id)
-    .select("id");
-  if (bySubErr) {
-    console.error("[stripe/webhook] update by subscription_id failed", bySubErr);
-  }
-  if (bySub && bySub.length > 0) return;
-
-  const userId =
-    fallbackUserId ??
-    (typeof subscription.metadata?.user_id === "string"
-      ? subscription.metadata.user_id
-      : null);
-  if (!userId) {
-    console.warn(
-      "[stripe/webhook] no user_id available to apply subscription",
-      { subscriptionId: subscription.id },
-    );
-    return;
-  }
-
-  const { error } = await admin
-    .from("profiles")
-    .update(update)
-    .eq("id", userId);
-  if (error) {
-    console.error("[stripe/webhook] update by user_id failed", error);
-  }
-}
 
 export async function POST(request: NextRequest) {
   if (!WEBHOOK_SECRET) {
@@ -134,7 +48,7 @@ export async function POST(request: NextRequest) {
             session.subscription,
             { expand: ["items.data.price"] },
           );
-          await applySubscriptionToProfile(subscription, userId);
+          await syncSubscriptionToProfile(subscription, userId);
         }
         break;
       }
@@ -142,7 +56,7 @@ export async function POST(request: NextRequest) {
       case "customer.subscription.created":
       case "customer.subscription.updated": {
         const subscription = event.data.object as Stripe.Subscription;
-        await applySubscriptionToProfile(subscription, null);
+        await syncSubscriptionToProfile(subscription, null);
         break;
       }
 
@@ -177,7 +91,7 @@ export async function POST(request: NextRequest) {
           const subscription = await stripe.subscriptions.retrieve(subId, {
             expand: ["items.data.price"],
           });
-          await applySubscriptionToProfile(subscription, null);
+          await syncSubscriptionToProfile(subscription, null);
         }
         break;
       }

@@ -7,6 +7,7 @@ import {
   comparePlans,
   type PaidPlan,
 } from "@/lib/stripe";
+import { syncSubscriptionToProfile } from "@/lib/billing/sync";
 
 export const runtime = "nodejs";
 
@@ -103,7 +104,7 @@ export async function POST(request: NextRequest) {
     const prorationBehavior: "always_invoice" | "create_prorations" =
       direction === "upgrade" ? "always_invoice" : "create_prorations";
 
-    await stripe.subscriptions.update(profile.subscription_id, {
+    const updated = await stripe.subscriptions.update(profile.subscription_id, {
       items: [{ id: itemId, price: targetPrice }],
       proration_behavior: prorationBehavior,
       // Re-activate if the user had scheduled a cancellation; otherwise leave
@@ -112,10 +113,19 @@ export async function POST(request: NextRequest) {
       metadata: { user_id: user.id, plan },
     });
 
-    // We let the webhook (customer.subscription.updated) reconcile profiles
-    // — it sets plan, subscription_status, current_period_*, etc. consistently
-    // with the checkout flow. Returning a redirect URL keeps the client side
-    // symmetric with /create-checkout-session.
+    // Sync the profile row inline before redirecting. Without this, the
+    // page reload races the customer.subscription.updated webhook (~1-3s),
+    // and the user sees their old plan on the billing page after the
+    // redirect. Idempotent with the webhook: when it lands later it writes
+    // the same fields.
+    try {
+      await syncSubscriptionToProfile(updated, user.id);
+    } catch (syncErr) {
+      // Don't block the response on sync failure — the webhook is still
+      // the source of truth and will reconcile.
+      console.error("[stripe/change-subscription] inline sync failed", syncErr);
+    }
+
     return NextResponse.json({
       url: `${siteUrl()}/dashboard/billing?upgraded=true`,
     });
