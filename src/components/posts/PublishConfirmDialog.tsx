@@ -312,7 +312,8 @@ export function PublishConfirmDialog({
           </div>
         </header>
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5 sm:p-6">
+        {/* Scrollable preview only — keeps method radio + footer in view. */}
+        <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-6">
           <div className="rounded-lg border border-line bg-bg/40 p-4">
             <div className="mb-2 text-[11px] uppercase tracking-wider text-ink-muted">
               内容（{totalLen}文字）
@@ -334,24 +335,29 @@ export function PublishConfirmDialog({
             )}
           </div>
 
-          <div className="space-y-2">
-            <p className="text-[11px] uppercase tracking-wider text-ink-muted">
-              投稿方法を選択
-            </p>
+        </div>
+
+        {/* Method radio is shrink-0 so it never scrolls out of view, even
+            for long post bodies. Sits between body and footer. */}
+        <div className="shrink-0 space-y-3 border-t border-line bg-bg-surface/95 p-5 backdrop-blur sm:p-6">
+          <p className="text-[11px] uppercase tracking-wider text-ink-muted">
+            投稿方法を選択
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
             <MethodRadio
               value="api"
               current={method}
               onChange={setMethod}
-              label="X に直接投稿（API 経由）"
-              description="AI が自動で X に投稿します。既存運用の X アカウント向け。"
+              label="X に直接投稿"
+              description="AI が自動で X に投稿（API 経由）"
             />
             <MethodRadio
               value="copy_paste"
               current={method}
               onChange={setMethod}
-              label="コピペで投稿（X API 不使用）"
+              label="コピペで投稿"
               badge="新規 X 推奨"
-              description="本文をコピーして自分で X に投稿。新規アカウントでも安全。"
+              description="本文をコピーして自分で X に投稿（API 不使用）"
             />
           </div>
 
