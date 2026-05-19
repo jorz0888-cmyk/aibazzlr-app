@@ -10,7 +10,9 @@ type Slot = {
   timeLabel: string;
   status:
     | "posted"
+    | "posted_manually"
     | "pending_approval"
+    | "awaiting_manual_post"
     | "failed"
     | "publishing"
     | "draft"
@@ -21,6 +23,8 @@ type Slot = {
   postId?: string;
   externalUrl?: string | null;
   aiConfigName?: string;
+  /** Full tweet text (content + hashtags) for copy/open actions. */
+  tweetText?: string;
 };
 
 const WEEKDAY = ["日", "月", "火", "水", "木", "金", "土"];
@@ -63,14 +67,16 @@ export async function AutoPostTimeline({ userId }: { userId: string }) {
     supabase
       .from("posts")
       .select(
-        "id, content, status, posted_at, created_at, platform_post_url, schedule_id, triggered_by, ai_config_id",
+        "id, content, hashtags, status, posted_at, created_at, platform_post_url, schedule_id, triggered_by, ai_config_id",
       )
       .eq("user_id", userId)
       .gte("created_at", yesterdayIso)
       .in("status", [
         "posted",
         "published",
+        "posted_manually",
         "pending_approval",
+        "awaiting_manual_post",
         "publishing",
         "failed",
         "rejected",
@@ -119,25 +125,33 @@ export async function AutoPostTimeline({ userId }: { userId: string }) {
     const eventTime = post.posted_at ?? post.created_at;
     if (!eventTime) continue;
     const jst = toJst(eventTime);
-    const isApproval =
-      post.status === "pending_approval" || post.status === "publishing";
+    let detail: string | null = null;
+    if (post.status === "pending_approval" || post.status === "publishing") {
+      detail = "承認待ち";
+    } else if (post.status === "awaiting_manual_post") {
+      detail = "コピペ待ち — 自分で X に投稿してください";
+    }
+    const status: Slot["status"] =
+      post.status === "published" ? "posted" : (post.status as Slot["status"]);
+    const tweetText =
+      status === "awaiting_manual_post"
+        ? buildPreviewTweet(post.content, post.hashtags)
+        : undefined;
     slots.push({
       key: `post-${post.id}`,
       kind: "post",
       jstIso: jst.toISOString(),
       dayBucket: jstDayBucket(jst, todayJst),
       timeLabel: fmtTime(jst),
-      status:
-        post.status === "published"
-          ? "posted"
-          : (post.status as Slot["status"]),
+      status,
       title: shortenContent(post.content),
-      detail: isApproval ? "承認待ち" : null,
+      detail,
       postId: post.id,
       externalUrl: post.platform_post_url,
       aiConfigName: post.ai_config_id
         ? configsById.get(post.ai_config_id)
         : undefined,
+      tweetText,
     });
   }
 
@@ -275,6 +289,7 @@ function TimelineItem({ slot }: { slot: Slot }) {
             postId={slot.postId}
             status={slot.status}
             externalUrl={slot.externalUrl ?? null}
+            tweetText={slot.tweetText ?? null}
           />
         )}
       </div>
@@ -287,6 +302,15 @@ function shortenContent(s: string | null | undefined): string {
   return s.length > 60 ? `${s.slice(0, 60)}…` : s;
 }
 
+function buildPreviewTweet(
+  content: string | null,
+  hashtags: string[] | null,
+): string {
+  const body = (content ?? "").trim();
+  const tags = (hashtags ?? []).filter(Boolean).join(" ");
+  return tags ? `${body}\n\n${tags}` : body;
+}
+
 function badgeFor(status: Slot["status"]): {
   color: string;
   icon: string;
@@ -295,6 +319,18 @@ function badgeFor(status: Slot["status"]): {
   switch (status) {
     case "posted":
       return { color: "bg-success/15 text-success", icon: "✓", label: "POSTED" };
+    case "posted_manually":
+      return {
+        color: "bg-success/15 text-success",
+        icon: "✓",
+        label: "POSTED (MANUAL)",
+      };
+    case "awaiting_manual_post":
+      return {
+        color: "bg-warning/15 text-warning",
+        icon: "📋",
+        label: "COPY & POST",
+      };
     case "pending_approval":
       return {
         color: "bg-warning/15 text-warning",

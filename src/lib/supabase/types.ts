@@ -20,6 +20,8 @@ export type PostStatus =
   | "pending_approval"
   | "approved"
   | "rejected"
+  | "awaiting_manual_post"
+  | "posted_manually"
   | "queued"
   | "scheduled"
   | "publishing"
@@ -28,7 +30,7 @@ export type PostStatus =
   | "failed"
   | "cancelled";
 
-export type PostingMode = "auto" | "approval";
+export type PostingMode = "auto" | "approval" | "manual";
 export type TriggeredBy = "manual" | "schedule";
 
 export type Schedule = {

@@ -256,7 +256,7 @@ export function AutoPostSection({
 
       <div className="space-y-3">
         <p className="label !mb-1">投稿モード</p>
-        <div className="flex flex-wrap gap-3">
+        <div className="grid gap-3 sm:grid-cols-3">
           <ModeRadio
             label="完全自動"
             description="AI が生成 → 即 X に投稿"
@@ -269,7 +269,7 @@ export function AutoPostSection({
           />
           <ModeRadio
             label="承認制"
-            description="生成 → ダッシュボードで承認 → 投稿"
+            description="生成 → ダッシュボードで承認 → API で投稿"
             value="approval"
             current={postingMode}
             onChange={(v) => {
@@ -277,7 +277,25 @@ export function AutoPostSection({
               void savePostingSettings({ mode: v });
             }}
           />
+          <ModeRadio
+            label="コピペモード"
+            description="生成 → 通知 → 自分で X に投稿（X API 不使用）"
+            highlight="新規 X 推奨"
+            value="manual"
+            current={postingMode}
+            onChange={(v) => {
+              setPostingMode(v);
+              void savePostingSettings({ mode: v });
+            }}
+          />
         </div>
+        <p className="rounded-md border border-line bg-white/5 p-3 text-[11px] leading-relaxed text-ink-subtle">
+          <b className="text-ink">X アカウントの状態について</b>
+          <br />
+          新規 X アカウント（作成から数週間以内）の場合、X 側のスパム対策により API
+          投稿が <span className="text-warning">403 Forbidden</span> でブロックされることがあります。
+          まずは <b>コピペモード</b> でアカウントを育て、軌道に乗ったら 承認制 / 完全自動 に切り替えるのがおすすめです。
+        </p>
       </div>
 
       <div className="space-y-3 border-t border-line pt-5">
@@ -416,7 +434,9 @@ export function AutoPostSection({
         指定時刻に AI が投稿を生成し、
         {postingMode === "auto"
           ? "そのまま X へ投稿します。"
-          : "ダッシュボード上で承認を求めます。"}
+          : postingMode === "approval"
+            ? "ダッシュボード上で承認を求めます。承認時に X API 経由で投稿します。"
+            : "ダッシュボードに「コピペ待ち」として表示します。本文をコピーして自分で X に投稿してください。"}
         月の投稿上限（Free 10 件 / Standard 150 件 / Premium 450 件）に達した場合は
         自動的にスキップされます。
       </p>
@@ -430,12 +450,14 @@ function ModeRadio({
   value,
   current,
   onChange,
+  highlight,
 }: {
   label: string;
   description: string;
   value: PostingMode;
   current: PostingMode;
   onChange: (v: PostingMode) => void;
+  highlight?: string;
 }) {
   const active = current === value;
   return (
@@ -443,22 +465,29 @@ function ModeRadio({
       type="button"
       onClick={() => onChange(value)}
       className={[
-        "flex flex-1 flex-col items-start gap-1 rounded-lg border p-3 text-left text-sm transition",
+        "flex flex-col items-start gap-1 rounded-lg border p-3 text-left text-sm transition",
         active
           ? "border-cyan bg-cyan/10 text-ink"
           : "border-line text-ink-muted hover:border-cyan/40",
       ].join(" ")}
     >
-      <span className="flex items-center gap-2 font-bold">
-        <span
-          className={[
-            "grid h-4 w-4 place-items-center rounded-full border",
-            active ? "border-cyan" : "border-line-strong",
-          ].join(" ")}
-        >
-          {active && <span className="h-2 w-2 rounded-full bg-cyan" />}
+      <span className="flex w-full items-center justify-between gap-2 font-bold">
+        <span className="flex items-center gap-2">
+          <span
+            className={[
+              "grid h-4 w-4 place-items-center rounded-full border",
+              active ? "border-cyan" : "border-line-strong",
+            ].join(" ")}
+          >
+            {active && <span className="h-2 w-2 rounded-full bg-cyan" />}
+          </span>
+          {label}
         </span>
-        {label}
+        {highlight && (
+          <span className="rounded-full bg-cyan/15 px-1.5 py-0.5 font-mono text-[9px] tracking-wider text-cyan">
+            {highlight}
+          </span>
+        )}
       </span>
       <span className="text-[11px] text-ink-subtle">{description}</span>
     </button>

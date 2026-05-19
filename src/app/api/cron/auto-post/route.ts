@@ -185,10 +185,16 @@ async function processSchedule(
     };
   }
 
-  // 2. Persist as a draft / pending_approval row, tagged with schedule_id
-  //    + triggered_by so the timeline can correlate the run.
+  // 2. Persist with a status that matches the configured posting mode.
+  //    - auto:     'draft' → publish path below flips to 'publishing' → 'posted'
+  //    - approval: 'pending_approval' → user clicks approve on dashboard
+  //    - manual:   'awaiting_manual_post' → user copies text + posts in X themselves
   const initialStatus: Post["status"] =
-    config.posting_mode === "auto" ? "draft" : "pending_approval";
+    config.posting_mode === "auto"
+      ? "draft"
+      : config.posting_mode === "manual"
+        ? "awaiting_manual_post"
+        : "pending_approval";
 
   const payload = applyPostDefaults({
     user_id: schedule.user_id,
@@ -228,7 +234,18 @@ async function processSchedule(
     };
   }
 
-  // 3b. Auto mode — immediately publish to X.
+  // 3b. Manual / copy-paste mode — also stop here. User copies the text
+  //     and posts it in the X app themselves; we never touch the X API,
+  //     which is the whole point (new accounts get 403'd by X otherwise).
+  if (config.posting_mode === "manual") {
+    return {
+      schedule_id: schedule.id,
+      post_id: inserted.id,
+      status: "awaiting_manual_post",
+    };
+  }
+
+  // 3c. Auto mode — immediately publish to X.
   const lockRes = await admin
     .from("posts")
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
