@@ -33,6 +33,36 @@ export type PostStatus =
 export type PostingMode = "auto" | "approval" | "manual";
 export type TriggeredBy = "manual" | "schedule";
 
+export type MediaSource = "upload" | "ai_generated";
+
+export type MediaLibraryRow = {
+  id: string;
+  user_id: string;
+  ai_config_id: string | null;
+  storage_path: string;
+  public_url: string;
+  source: MediaSource;
+  tags: string[];
+  ai_description: string | null;
+  width: number | null;
+  height: number | null;
+  file_size_bytes: number | null;
+  created_at: string;
+};
+
+export type MediaLibraryInsert = Partial<
+  Omit<MediaLibraryRow, "id" | "created_at">
+> & {
+  user_id: string;
+  storage_path: string;
+  public_url: string;
+  source: MediaSource;
+};
+
+export type MediaLibraryUpdate = Partial<
+  Omit<MediaLibraryRow, "id" | "user_id" | "created_at">
+>;
+
 export type Schedule = {
   id: string;
   ai_config_id: string;
@@ -92,6 +122,9 @@ export type Profile = {
   current_period_end: string | null;
   cancel_at_period_end: boolean;
   canceled_at: string | null;
+  // Phase 12: AI image usage counter
+  ai_images_used_this_period: number;
+  ai_images_period_start: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -233,6 +266,8 @@ export type Post = {
   triggered_by: TriggeredBy;
   schedule_id: string | null;
   approval_token: string | null;
+  // Phase 12: image linkage. image_url already existed above; media_id is new.
+  media_id: string | null;
   // Legacy column (kept for back-compat)
   external_post_id: string | null;
   /** All engagement metrics live in this jsonb (likes/retweets/etc). */
@@ -399,6 +434,12 @@ export type Database = {
         Row: Schedule;
         Insert: ScheduleInsert;
         Update: ScheduleUpdate;
+        Relationships: [];
+      };
+      media_library: {
+        Row: MediaLibraryRow;
+        Insert: MediaLibraryInsert;
+        Update: MediaLibraryUpdate;
         Relationships: [];
       };
       oauth_sessions: {

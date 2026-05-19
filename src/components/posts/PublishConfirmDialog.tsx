@@ -20,6 +20,7 @@ export function PublishConfirmDialog({
   platform,
   content,
   hashtags,
+  imageUrl,
   onConfirm,
   onCancel,
   onAbort,
@@ -35,6 +36,8 @@ export function PublishConfirmDialog({
   platform: string;
   content: string;
   hashtags: string[];
+  /** Optional image attached to the draft (Phase 12). */
+  imageUrl?: string | null;
   /** Called when the user picks "X に直接投稿" and confirms. */
   onConfirm: () => void;
   onCancel: () => void;
@@ -167,6 +170,32 @@ export function PublishConfirmDialog({
           </header>
 
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5 sm:p-6">
+            {imageUrl && (
+              <div className="space-y-2">
+                <div className="overflow-hidden rounded-lg border border-line">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={imageUrl}
+                    alt="投稿画像"
+                    className="h-auto max-h-48 w-full object-cover"
+                  />
+                </div>
+                <a
+                  href={imageUrl}
+                  download
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-secondary inline-flex items-center text-xs"
+                >
+                  📥 画像をダウンロード
+                </a>
+                <p className="rounded-md bg-warning/10 p-2 text-[11px] leading-relaxed text-warning">
+                  📸 X の投稿画面では <b>画像が自動添付されません</b>。
+                  上のボタンで画像をダウンロード →
+                  X 投稿画面の「画像を追加」から手動でアップロードしてください。
+                </p>
+              </div>
+            )}
             <pre className="max-h-60 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-line bg-bg/40 p-4 font-sans text-sm leading-relaxed text-ink">
               {tweetText}
             </pre>
@@ -314,6 +343,16 @@ export function PublishConfirmDialog({
 
         {/* Scrollable preview only — keeps method radio + footer in view. */}
         <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-6">
+          {imageUrl && (
+            <div className="mb-3 overflow-hidden rounded-lg border border-line">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={imageUrl}
+                alt="投稿画像"
+                className="h-auto max-h-48 w-full object-cover"
+              />
+            </div>
+          )}
           <div className="rounded-lg border border-line bg-bg/40 p-4">
             <div className="mb-2 text-[11px] uppercase tracking-wider text-ink-muted">
               内容（{totalLen}文字）

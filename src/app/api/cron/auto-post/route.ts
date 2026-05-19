@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { getAiConfigById } from "@/lib/db/ai-configs";
 import { generatePostDraft } from "@/lib/posts/generator";
+import { autoAttachLibraryImage } from "@/lib/media/autoSelect";
 import { publishPostToX } from "@/lib/posts/publisher";
 import { applyPostDefaults } from "@/lib/db/post-defaults";
 import { updatePostWithRetry } from "@/lib/db/post-update";
@@ -196,6 +197,15 @@ async function processSchedule(
         ? "awaiting_manual_post"
         : "pending_approval";
 
+  // Phase 12: auto-attach a library image if the user has one.
+  const picked = await autoAttachLibraryImage(
+    admin,
+    schedule.user_id,
+    config.id,
+    generated.content,
+    generated.hashtags,
+  );
+
   const payload = applyPostDefaults({
     user_id: schedule.user_id,
     ai_config_id: config.id,
@@ -208,6 +218,8 @@ async function processSchedule(
     status: initialStatus,
     triggered_by: "schedule",
     schedule_id: schedule.id,
+    media_id: picked.media_id,
+    image_url: picked.image_url,
   });
 
   const { data: inserted, error: insertErr } = await admin

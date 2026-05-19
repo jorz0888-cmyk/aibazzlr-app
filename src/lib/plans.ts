@@ -11,6 +11,7 @@ export const PLAN_LIMITS = {
     social_accounts_max: 1,
     hearings_per_day: 1,
     test_posts_per_day: 5,
+    ai_images_per_month: 0, // Free users can upload, but cannot generate
   },
   standard: {
     posts_per_month: 150,
@@ -18,6 +19,7 @@ export const PLAN_LIMITS = {
     social_accounts_max: 1,
     hearings_per_day: 3,
     test_posts_per_day: 10,
+    ai_images_per_month: 30,
   },
   premium: {
     posts_per_month: 450,
@@ -25,6 +27,7 @@ export const PLAN_LIMITS = {
     social_accounts_max: 1,
     hearings_per_day: 10,
     test_posts_per_day: 20,
+    ai_images_per_month: 100,
   },
 } as const;
 

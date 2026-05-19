@@ -232,6 +232,22 @@ export function PostCard({ post }: { post: PostListItem }) {
           )}
         </header>
 
+        {post.image_url && (
+          <a
+            href={post.image_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block overflow-hidden rounded-lg border border-line"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={post.image_url}
+              alt="投稿画像"
+              className="h-auto max-h-64 w-full object-cover"
+            />
+          </a>
+        )}
+
         <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">
           {post.content}
         </p>
@@ -376,6 +392,7 @@ export function PostCard({ post }: { post: PostListItem }) {
         platform={platform}
         content={post.content}
         hashtags={post.hashtags ?? []}
+        imageUrl={post.image_url}
         onCancel={() => {
           setConfirming(false);
           setError(null);

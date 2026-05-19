@@ -202,19 +202,95 @@ export function translateXError(
   };
 }
 
+/**
+ * Upload an image to X via the v1.1 media/upload endpoint (still the
+ * canonical "simple upload" path even with OAuth2 user-context tokens).
+ * Returns the `media_id_string` to thread into the tweet body. Caller is
+ * responsible for fail-soft handling — if this throws we still want to post
+ * the tweet as text only.
+ */
+const X_MEDIA_UPLOAD_URL = "https://upload.twitter.com/1.1/media/upload.json";
+
+export async function uploadImageToX(
+  accessToken: string,
+  imageUrl: string,
+): Promise<string> {
+  // Fetch the image bytes ourselves first (Supabase public URL → bytes →
+  // multipart). Done server-side because the X endpoint expects raw bytes.
+  const fetched = await fetch(imageUrl);
+  if (!fetched.ok) {
+    throw new XApiError(
+      `画像の取得に失敗しました (status=${fetched.status})`,
+      fetched.status,
+    );
+  }
+  const arrayBuf = await fetched.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuf);
+
+  const form = new FormData();
+  // Pass as Blob so undici fills in the proper Content-Type boundary.
+  form.append(
+    "media",
+    new Blob([bytes], {
+      type: fetched.headers.get("content-type") ?? "image/jpeg",
+    }),
+    "image",
+  );
+
+  let response: Response;
+  try {
+    response = await fetch(X_MEDIA_UPLOAD_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: form,
+    });
+  } catch (e) {
+    throw new XApiError(
+      `X media upload に接続できませんでした: ${e instanceof Error ? e.message : String(e)}`,
+      0,
+    );
+  }
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    const { message, rawDetail } = translateXError(response.status, body);
+    throw new XApiError(`画像アップロード失敗: ${message}`, response.status, rawDetail);
+  }
+
+  const json = (await response.json()) as {
+    media_id_string?: string;
+    media_id?: number;
+  };
+  const id = json.media_id_string ?? (json.media_id ? String(json.media_id) : null);
+  if (!id) {
+    throw new XApiError(
+      "X 側応答に media_id が含まれていませんでした",
+      response.status,
+    );
+  }
+  return id;
+}
+
 export async function postToX(
   accessToken: string,
   text: string,
+  mediaIds?: string[],
 ): Promise<XTweetResponse> {
   let response: Response;
   try {
+    const body: Record<string, unknown> = { text };
+    if (mediaIds && mediaIds.length > 0) {
+      body.media = { media_ids: mediaIds };
+    }
     response = await fetch(X_TWEETS_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify(body),
     });
   } catch (e) {
     throw new XApiError(

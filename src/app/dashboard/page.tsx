@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { listSocialAccountsByUser } from "@/lib/db/social-accounts";
 import { listAiConfigsByUser } from "@/lib/db/ai-configs";
 import { countPostsByUser } from "@/lib/db/posts";
-import { checkMonthlyPostQuota } from "@/lib/quota";
+import { checkMonthlyPostQuota, checkMonthlyImageQuota } from "@/lib/quota";
 import { PLAN_DISPLAY_NAMES } from "@/lib/plans";
 import { AutoPostTimeline } from "./AutoPostTimeline";
 
@@ -18,12 +18,14 @@ export default async function DashboardHome() {
 
   // Fetch dashboard stats with isolated failures so a single bad query
   // doesn't crash the whole landing page.
-  const [snsRes, configsRes, postsCountRes, quotaRes] = await Promise.allSettled([
-    listSocialAccountsByUser(supabase, user.id),
-    listAiConfigsByUser(supabase, user.id),
-    countPostsByUser(supabase, user.id, "posted"),
-    checkMonthlyPostQuota(user.id),
-  ]);
+  const [snsRes, configsRes, postsCountRes, quotaRes, imageQuotaRes] =
+    await Promise.allSettled([
+      listSocialAccountsByUser(supabase, user.id),
+      listAiConfigsByUser(supabase, user.id),
+      countPostsByUser(supabase, user.id, "posted"),
+      checkMonthlyPostQuota(user.id),
+      checkMonthlyImageQuota(user.id),
+    ]);
 
   const snsCount =
     snsRes.status === "fulfilled" ? snsRes.value.length : 0;
@@ -33,6 +35,8 @@ export default async function DashboardHome() {
     postsCountRes.status === "fulfilled" ? postsCountRes.value : 0;
   const quota =
     quotaRes.status === "fulfilled" ? quotaRes.value : null;
+  const imageQuota =
+    imageQuotaRes.status === "fulfilled" ? imageQuotaRes.value : null;
 
   const hasSns = snsCount > 0;
   const hasAiConfig = configsCount > 0;
@@ -83,6 +87,18 @@ export default async function DashboardHome() {
             <p className="mt-3 text-xs text-warning">
               残り {quota.remaining} 件です。アップグレードで上限を引き上げできます。
             </p>
+          )}
+
+          {imageQuota && imageQuota.limit > 0 && (
+            <div className="mt-5 border-t border-line pt-4">
+              <p className="font-mono text-[10px] tracking-[0.2em] text-ink-muted">
+                AI IMAGES THIS PERIOD
+              </p>
+              <p className="mt-1 text-sm text-ink">
+                {imageQuota.used} / {imageQuota.limit}
+              </p>
+              <UsageBar value={imageQuota.used} max={imageQuota.limit} />
+            </div>
           )}
         </div>
       )}

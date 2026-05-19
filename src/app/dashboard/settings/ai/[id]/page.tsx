@@ -11,6 +11,7 @@ import {
 } from "@/components/config/editable";
 import { ConfigDetailActions } from "./ConfigDetailActions";
 import { AutoPostSection } from "./AutoPostSection";
+import { MediaLibrarySection } from "./MediaLibrarySection";
 
 export const dynamic = "force-dynamic";
 
@@ -268,6 +269,8 @@ export default async function ConfigDetailPage({
           max={10}
         />
       </Card>
+
+      <MediaLibrarySection aiConfigId={config.id} />
 
       <AutoPostSection
         aiConfigId={config.id}

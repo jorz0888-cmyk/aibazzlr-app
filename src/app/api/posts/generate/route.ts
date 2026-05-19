@@ -5,6 +5,7 @@ import { getSocialAccountById } from "@/lib/db/social-accounts";
 import { extractDbError } from "@/lib/db/error";
 import { applyPostDefaults } from "@/lib/db/post-defaults";
 import { generatePostDraft } from "@/lib/posts/generator";
+import { autoAttachLibraryImage } from "@/lib/media/autoSelect";
 import type { Platform } from "@/lib/supabase/types";
 import { checkRateLimit, rateLimitedResponse } from "@/lib/rate-limit";
 import {
@@ -82,10 +83,21 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 2. Persist as draft. applyPostDefaults fills in NOT-NULL columns
-  //    (status, scheduled_at, hashtags, platform, engagement_data,
-  //    generation_metadata, retry_count) so a missing DB default never
-  //    triggers a 23502 here.
+  // 2a. Phase 12: ask Claude to pick a matching image from the user's
+  //     media library (if any). Fail-soft — empty library or unfit
+  //     candidates just means we create the draft without an image.
+  const picked = await autoAttachLibraryImage(
+    supabase,
+    user.id,
+    aiConfig.id,
+    generated.content,
+    generated.hashtags,
+  );
+
+  // 2b. Persist as draft. applyPostDefaults fills in NOT-NULL columns
+  //     (status, scheduled_at, hashtags, platform, engagement_data,
+  //     generation_metadata, retry_count) so a missing DB default never
+  //     triggers a 23502 here.
   const insertPayload = applyPostDefaults({
     user_id: user.id,
     ai_config_id: aiConfig.id,
@@ -95,6 +107,8 @@ export async function POST(request: NextRequest) {
     hashtags: generated.hashtags,
     theme: generated.theme,
     generation_metadata: generated.metadata,
+    media_id: picked.media_id,
+    image_url: picked.image_url,
   });
 
   const { data, error } = await supabase

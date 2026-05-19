@@ -6,6 +6,7 @@ import {
   buildPostUrl,
   buildTweetText,
   postToX,
+  uploadImageToX,
   XApiError,
 } from "@/lib/posts/x-api";
 import type { Post } from "@/lib/supabase/types";
@@ -92,8 +93,24 @@ export async function publishPostToX(
     };
   }
 
+  // Phase 12: attach the image if the draft has one. Fail-soft — if the
+  // media upload fails, we still want to post the tweet as text only so
+  // the user is not blocked by a transient image issue.
+  let mediaIds: string[] | undefined;
+  if (post.image_url) {
+    try {
+      const mediaId = await uploadImageToX(accessToken, post.image_url);
+      mediaIds = [mediaId];
+    } catch (e) {
+      console.warn(
+        "[publisher] X media upload failed; posting text-only",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
+
   try {
-    const tweet = await postToX(accessToken, tweetText);
+    const tweet = await postToX(accessToken, tweetText, mediaIds);
     return {
       ok: true,
       tweetId: tweet.id,

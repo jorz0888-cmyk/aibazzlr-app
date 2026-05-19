@@ -300,6 +300,133 @@ export async function checkAiConfigQuota(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Monthly AI image generation quota (Phase 12). Tracked as a counter on
+// profiles rather than a SELECT count(*) because generated images are stored
+// with `source='ai_generated'` and we want refunds / soft-resets to be a
+// simple UPDATE without rescanning the library.
+// ---------------------------------------------------------------------------
+
+export interface MonthlyImageQuotaResult {
+  allowed: boolean;
+  used: number;
+  limit: number;
+  remaining: number;
+  plan: Plan;
+}
+
+/**
+ * If the recorded `ai_images_period_start` is in a previous calendar month
+ * (free) or before the current Stripe billing period (paid), the counter
+ * needs a reset. We perform the reset inline so callers always see the
+ * correct number.
+ */
+async function readOrResetImageQuota(
+  userId: string,
+): Promise<{ plan: Plan; used: number; periodStartIso: string }> {
+  const supabase = await createClient();
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select(
+      "plan, ai_images_used_this_period, ai_images_period_start, current_period_start",
+    )
+    .eq("id", userId)
+    .single();
+
+  const plan = (profile?.plan ?? "free") as Plan;
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const wantStartIso =
+    plan === "free"
+      ? monthStart.toISOString()
+      : (profile?.current_period_start ?? monthStart.toISOString());
+
+  const recordedStart = profile?.ai_images_period_start ?? null;
+  if (!recordedStart || new Date(recordedStart) < new Date(wantStartIso)) {
+    await supabase
+      .from("profiles")
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .update({
+        ai_images_used_this_period: 0,
+        ai_images_period_start: wantStartIso,
+      } as any)
+      .eq("id", userId);
+    return { plan, used: 0, periodStartIso: wantStartIso };
+  }
+
+  return {
+    plan,
+    used: profile?.ai_images_used_this_period ?? 0,
+    periodStartIso: recordedStart,
+  };
+}
+
+export async function checkMonthlyImageQuota(
+  userId: string,
+): Promise<MonthlyImageQuotaResult> {
+  const { plan, used } = await readOrResetImageQuota(userId);
+  const limit = getPlanLimits(plan).ai_images_per_month;
+  return {
+    allowed: limit > 0 && used < limit,
+    used,
+    limit,
+    remaining: Math.max(0, limit - used),
+    plan,
+  };
+}
+
+/**
+ * Atomically increment the AI image counter for the current period. Caller
+ * should have called `checkMonthlyImageQuota` first to confirm capacity.
+ */
+export async function recordAiImageUsage(userId: string): Promise<void> {
+  const supabase = await createClient();
+  // Use the profile row's existing counter so concurrent generations don't
+  // both read "0" and write "1".
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("ai_images_used_this_period")
+    .eq("id", userId)
+    .single();
+  const next = (profile?.ai_images_used_this_period ?? 0) + 1;
+  await supabase
+    .from("profiles")
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .update({ ai_images_used_this_period: next } as any)
+    .eq("id", userId);
+}
+
+export function imageQuotaExceededResponse(
+  result: MonthlyImageQuotaResult,
+): NextResponse {
+  const planLabel =
+    result.plan === "free"
+      ? "Standard 以上"
+      : result.plan === "standard"
+        ? "Premium"
+        : null;
+  return NextResponse.json(
+    {
+      error: "monthly_image_quota_exceeded",
+      message:
+        result.limit === 0
+          ? `現在のプラン（${result.plan}）では AI 画像生成は利用できません。${
+              planLabel ?? ""
+            } プランにアップグレードしてください。`
+          : `今月の AI 画像生成上限（${result.limit} 枚）に達しました。${
+              planLabel ? `${planLabel} プランにアップグレードするか、` : ""
+            }来月のリセットをお待ちください。`,
+      details: {
+        used: result.used,
+        limit: result.limit,
+        plan: result.plan,
+      },
+    },
+    { status: 429 },
+  );
+}
+
 export function aiConfigQuotaExceededResponse(
   result: AiConfigQuotaResult,
 ): NextResponse {
