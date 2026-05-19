@@ -4,8 +4,18 @@ import { useEffect, useState } from "react";
 import { Spinner } from "@/components/Spinner";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
+export type PublishMethod = "api" | "copy_paste";
+
+function buildXIntent(text: string): string {
+  // x.com/intent/post is the documented share-intent URL; supports prefilled
+  // text reliably on both logged-in and signed-out flows. compose/post does
+  // not — some clients drop the text param.
+  return `https://x.com/intent/post?text=${encodeURIComponent(text)}`;
+}
+
 export function PublishConfirmDialog({
   open,
+  postId,
   username,
   platform,
   content,
@@ -13,19 +23,48 @@ export function PublishConfirmDialog({
   onConfirm,
   onCancel,
   onAbort,
+  onCopyPasteDone,
   loading,
+  publishError,
+  defaultMethod = "api",
 }: {
   open: boolean;
+  /** Used for the copy-paste sub-flow APIs (mark-as-awaiting-manual / mark-as-posted). */
+  postId: string;
   username: string;
   platform: string;
   content: string;
   hashtags: string[];
+  /** Called when the user picks "X に直接投稿" and confirms. */
   onConfirm: () => void;
   onCancel: () => void;
   onAbort?: () => void;
+  /** Called after the user clicks "投稿しました" in copy-paste mode. */
+  onCopyPasteDone?: () => void;
   loading: boolean;
+  /** Last error from the API publish path. Used to surface the copy-paste fallback. */
+  publishError?: string | null;
+  /** Pre-select the radio: derive from AI config's posting_mode upstream. */
+  defaultMethod?: PublishMethod;
 }) {
   const [abortPromptOpen, setAbortPromptOpen] = useState(false);
+  const [method, setMethod] = useState<PublishMethod>(defaultMethod);
+  // Sub-modes for the copy-paste branch.
+  const [mode, setMode] = useState<"choose" | "copy_paste_actions">("choose");
+  const [transitioning, setTransitioning] = useState(false);
+  const [innerError, setInnerError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  // Reset internal state every time the dialog opens.
+  useEffect(() => {
+    if (open) {
+      setMethod(defaultMethod);
+      setMode("choose");
+      setTransitioning(false);
+      setInnerError(null);
+      setCopied(false);
+    }
+  }, [open, defaultMethod]);
 
   useEffect(() => {
     if (!open) return;
@@ -47,8 +86,10 @@ export function PublishConfirmDialog({
 
   if (!open) return null;
   const tagText = hashtags.join(" ");
-  const totalLen = (tagText ? content + "\n\n" + tagText : content).length;
+  const tweetText = tagText ? `${content}\n\n${tagText}` : content;
+  const totalLen = tweetText.length;
 
+  // ─── Sending state (only used when method === 'api') ──────────────────
   if (loading) {
     return (
       <>
@@ -102,6 +143,145 @@ export function PublishConfirmDialog({
     );
   }
 
+  // ─── Copy-paste actions sub-mode ──────────────────────────────────────
+  if (mode === "copy_paste_actions") {
+    return (
+      <div
+        className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur sm:p-6"
+        onClick={onCancel}
+      >
+        <div
+          className="card flex max-h-[95vh] w-full max-w-md flex-col overflow-hidden p-0 sm:max-h-[90vh]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <header className="shrink-0 border-b border-line p-5 sm:p-6">
+            <p className="font-mono text-[11px] tracking-[0.25em] text-cyan">
+              ── COPY &amp; POST
+            </p>
+            <h2 className="mt-1 text-lg font-bold text-ink">
+              コピペで投稿
+            </h2>
+            <p className="mt-1 text-xs text-ink-muted">
+              本文をコピーして X で貼り付け → 戻って「投稿しました」を押してください
+            </p>
+          </header>
+
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5 sm:p-6">
+            <pre className="max-h-60 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-line bg-bg/40 p-4 font-sans text-sm leading-relaxed text-ink">
+              {tweetText}
+            </pre>
+            <p className="text-[11px] text-ink-subtle">
+              文字数 {totalLen} / 280
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={async () => {
+                  setInnerError(null);
+                  try {
+                    await navigator.clipboard.writeText(tweetText);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 1800);
+                  } catch (e) {
+                    setInnerError(
+                      e instanceof Error ? e.message : "コピーに失敗しました",
+                    );
+                  }
+                }}
+              >
+                {copied ? "コピー済み ✓" : "📋 本文をコピー"}
+              </button>
+              <a
+                href={buildXIntent(tweetText)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-secondary"
+              >
+                🔗 X で開く
+              </a>
+            </div>
+            {innerError && (
+              <p className="text-xs text-danger">{innerError}</p>
+            )}
+            <p className="rounded-md bg-white/5 p-3 text-[11px] leading-relaxed text-ink-subtle">
+              「X で開く」は X.com の投稿画面を新しいタブで開き、本文を自動で貼り付けます。
+              送信後にこのダイアログへ戻り「投稿しました」を押すと、AIBazzlr 側でも記録されます。
+            </p>
+          </div>
+
+          <footer className="shrink-0 border-t border-line bg-bg-surface/95 p-4 backdrop-blur sm:p-5">
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                className="btn-secondary w-full sm:w-auto"
+                onClick={onCancel}
+              >
+                閉じる
+              </button>
+              <button
+                type="button"
+                className="btn-primary w-full sm:w-auto"
+                onClick={async () => {
+                  setInnerError(null);
+                  setTransitioning(true);
+                  try {
+                    const res = await fetch(
+                      `/api/posts/${postId}/mark-as-posted`,
+                      { method: "POST" },
+                    );
+                    if (!res.ok) {
+                      const body = (await res
+                        .json()
+                        .catch(() => ({}))) as { error?: string };
+                      throw new Error(body.error ?? `HTTP ${res.status}`);
+                    }
+                    onCopyPasteDone?.();
+                  } catch (e) {
+                    setInnerError(
+                      e instanceof Error ? e.message : "更新に失敗しました",
+                    );
+                    setTransitioning(false);
+                  }
+                }}
+                disabled={transitioning}
+              >
+                {transitioning ? <Spinner /> : "✅ 投稿しました"}
+              </button>
+            </div>
+          </footer>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Choice mode (initial) ───────────────────────────────────────────
+  async function startCopyPaste() {
+    setInnerError(null);
+    setTransitioning(true);
+    try {
+      const res = await fetch(
+        `/api/posts/${postId}/mark-as-awaiting-manual`,
+        { method: "POST" },
+      );
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      setMode("copy_paste_actions");
+    } catch (e) {
+      setInnerError(e instanceof Error ? e.message : "切り替えに失敗しました");
+    } finally {
+      setTransitioning(false);
+    }
+  }
+
+  const isForbidden =
+    !!publishError &&
+    /403|forbidden|スパム|権限|許可|denied/i.test(publishError);
+
   return (
     <div
       className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur sm:p-6"
@@ -116,7 +296,7 @@ export function PublishConfirmDialog({
             ── CONFIRM PUBLISH
           </p>
           <h2 className="mt-1 text-lg font-bold text-ink">
-            本当に投稿しますか？
+            投稿しますか？
           </h2>
 
           <div className="mt-4 space-y-1 rounded-lg border border-cyan/30 bg-cyan/5 p-3">
@@ -132,7 +312,7 @@ export function PublishConfirmDialog({
           </div>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-6">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5 sm:p-6">
           <div className="rounded-lg border border-line bg-bg/40 p-4">
             <div className="mb-2 text-[11px] uppercase tracking-wider text-ink-muted">
               内容（{totalLen}文字）
@@ -154,9 +334,43 @@ export function PublishConfirmDialog({
             )}
           </div>
 
-          <p className="mt-4 text-[11px] text-ink-subtle">
-            投稿後はXのタイムラインに即時反映されます。
-          </p>
+          <div className="space-y-2">
+            <p className="text-[11px] uppercase tracking-wider text-ink-muted">
+              投稿方法を選択
+            </p>
+            <MethodRadio
+              value="api"
+              current={method}
+              onChange={setMethod}
+              label="X に直接投稿（API 経由）"
+              description="AI が自動で X に投稿します。既存運用の X アカウント向け。"
+            />
+            <MethodRadio
+              value="copy_paste"
+              current={method}
+              onChange={setMethod}
+              label="コピペで投稿（X API 不使用）"
+              badge="新規 X 推奨"
+              description="本文をコピーして自分で X に投稿。新規アカウントでも安全。"
+            />
+          </div>
+
+          {publishError && (
+            <div className="rounded-md border border-danger/30 bg-danger/10 p-3 text-xs text-danger">
+              <p className="font-bold">前回の投稿でエラーが発生しました</p>
+              <p className="mt-1 whitespace-pre-wrap">{publishError}</p>
+              {isForbidden && (
+                <p className="mt-2 text-[11px]">
+                  X 側のスパム対策により API 投稿がブロックされている可能性があります。
+                  上の「コピペで投稿」に切り替えてお試しください。
+                </p>
+              )}
+            </div>
+          )}
+
+          {innerError && (
+            <p className="text-xs text-danger">{innerError}</p>
+          )}
         </div>
 
         <footer className="shrink-0 border-t border-line bg-bg-surface/95 p-4 backdrop-blur sm:p-5">
@@ -165,21 +379,83 @@ export function PublishConfirmDialog({
               type="button"
               className="btn-secondary w-full sm:w-auto"
               onClick={onCancel}
-              disabled={loading}
+              disabled={transitioning}
             >
               キャンセル
             </button>
             <button
               type="button"
               className="btn-primary w-full sm:w-auto"
-              onClick={onConfirm}
-              disabled={loading}
+              onClick={() => {
+                if (method === "api") {
+                  onConfirm();
+                } else {
+                  void startCopyPaste();
+                }
+              }}
+              disabled={transitioning}
             >
-              {loading ? <Spinner /> : "🚀 投稿する"}
+              {transitioning ? (
+                <Spinner />
+              ) : method === "api" ? (
+                "🚀 X に投稿する"
+              ) : (
+                "📋 コピペ画面へ"
+              )}
             </button>
           </div>
         </footer>
       </div>
     </div>
+  );
+}
+
+function MethodRadio({
+  value,
+  current,
+  onChange,
+  label,
+  description,
+  badge,
+}: {
+  value: PublishMethod;
+  current: PublishMethod;
+  onChange: (v: PublishMethod) => void;
+  label: string;
+  description: string;
+  badge?: string;
+}) {
+  const active = current === value;
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(value)}
+      className={[
+        "flex w-full flex-col gap-1 rounded-lg border p-3 text-left text-sm transition",
+        active
+          ? "border-cyan bg-cyan/10 text-ink"
+          : "border-line text-ink-muted hover:border-cyan/40",
+      ].join(" ")}
+    >
+      <span className="flex items-center justify-between gap-2 font-bold">
+        <span className="flex items-center gap-2">
+          <span
+            className={[
+              "grid h-4 w-4 place-items-center rounded-full border",
+              active ? "border-cyan" : "border-line-strong",
+            ].join(" ")}
+          >
+            {active && <span className="h-2 w-2 rounded-full bg-cyan" />}
+          </span>
+          {label}
+        </span>
+        {badge && (
+          <span className="rounded-full bg-cyan/15 px-1.5 py-0.5 font-mono text-[9px] tracking-wider text-cyan">
+            {badge}
+          </span>
+        )}
+      </span>
+      <span className="text-[11px] text-ink-subtle">{description}</span>
+    </button>
   );
 }

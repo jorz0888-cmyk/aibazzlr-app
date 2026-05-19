@@ -371,14 +371,24 @@ export function PostCard({ post }: { post: PostListItem }) {
       )}
       <PublishConfirmDialog
         open={confirming}
+        postId={post.id}
         username={username}
         platform={platform}
         content={post.content}
         hashtags={post.hashtags ?? []}
-        onCancel={() => setConfirming(false)}
+        onCancel={() => {
+          setConfirming(false);
+          setError(null);
+        }}
         onConfirm={publish}
         onAbort={abortPublish}
+        onCopyPasteDone={() => {
+          setConfirming(false);
+          toast.success("コピペ投稿として記録しました");
+          router.refresh();
+        }}
         loading={busy === "publish"}
+        publishError={error}
       />
       <ConfirmDialog
         open={deleteOpen}
