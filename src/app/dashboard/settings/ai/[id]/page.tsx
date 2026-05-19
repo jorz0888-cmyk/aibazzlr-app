@@ -12,6 +12,7 @@ import {
 import { ConfigDetailActions } from "./ConfigDetailActions";
 import { AutoPostSection } from "./AutoPostSection";
 import { MediaLibrarySection } from "./MediaLibrarySection";
+import { MarketingStrategySection } from "./MarketingStrategySection";
 
 export const dynamic = "force-dynamic";
 
@@ -205,6 +206,14 @@ export default async function ConfigDetailPage({
           </div>
         </Card>
       )}
+
+      <MarketingStrategySection
+        configId={config.id}
+        industry={config.industry}
+        initialGoal={config.monthly_goal}
+        initialAudiencePreset={config.target_audience_preset}
+        initialAudienceDescription={config.target_audience_description}
+      />
 
       <Card title="世界観">
         <EditableTextarea

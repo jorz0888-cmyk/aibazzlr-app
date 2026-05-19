@@ -213,9 +213,27 @@ export type AiConfig = {
   // -- Phase 11: auto-post --
   posting_mode: PostingMode;
   auto_post_enabled: boolean;
+  // -- Phase 13: marketing strategy --
+  monthly_goal: MonthlyGoalKey | null;
+  target_audience_preset: string | null;
+  target_audience_description: string | null;
+  recent_topics: RecentTopicEntry[];
   // ----------------------------------------------
   created_at: string;
   updated_at: string;
+};
+
+export type MonthlyGoalKey =
+  | "new_customers"
+  | "returning_customers"
+  | "weekday_visits"
+  | "higher_spend"
+  | "brand_awareness"
+  | "follower_growth";
+
+export type RecentTopicEntry = {
+  topic: string;
+  last_used: string;
 };
 
 export type GenerationMetadata = {
@@ -268,6 +286,9 @@ export type Post = {
   approval_token: string | null;
   // Phase 12: image linkage. image_url already existed above; media_id is new.
   media_id: string | null;
+  // Phase 13: strategy + topic tags
+  strategic_intent: string | null;
+  topic_tags: string[];
   // Legacy column (kept for back-compat)
   external_post_id: string | null;
   /** All engagement metrics live in this jsonb (likes/retweets/etc). */

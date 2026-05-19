@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/server";
 import { getAiConfigById } from "@/lib/db/ai-configs";
 import { generatePostDraft } from "@/lib/posts/generator";
 import { autoAttachLibraryImage } from "@/lib/media/autoSelect";
+import { recordTopicTags } from "@/lib/strategy/topic-tracking";
 import { publishPostToX } from "@/lib/posts/publisher";
 import { applyPostDefaults } from "@/lib/db/post-defaults";
 import { updatePostWithRetry } from "@/lib/db/post-update";
@@ -170,10 +171,15 @@ async function processSchedule(
     };
   }
 
-  // 1. Generate the draft via Claude.
+  // 1. Generate the draft via Claude. Phase 13: pass the scheduled JST clock
+  //    so the strategy section can flag "this is an optimal time" for the
+  //    configured goal.
+  const scheduledTimeJst = `${String(schedule.hour).padStart(2, "0")}:${String(schedule.minute).padStart(2, "0")}`;
   let generated;
   try {
-    generated = await generatePostDraft(config);
+    generated = await generatePostDraft(config, undefined, {
+      scheduledTimeJst,
+    });
   } catch (e) {
     console.error("[cron/auto-post] generation failed", {
       schedule_id: schedule.id,
@@ -220,6 +226,8 @@ async function processSchedule(
     schedule_id: schedule.id,
     media_id: picked.media_id,
     image_url: picked.image_url,
+    strategic_intent: generated.strategic_intent,
+    topic_tags: generated.topic_tags,
   });
 
   const { data: inserted, error: insertErr } = await admin
@@ -235,6 +243,11 @@ async function processSchedule(
       status: "insert_failed",
       error: insertErr?.message,
     };
+  }
+
+  // Phase 13: update recent topic tags so the next firing avoids repeats.
+  if (generated.topic_tags.length > 0) {
+    void recordTopicTags(admin, config.id, generated.topic_tags);
   }
 
   // 3a. Approval mode — stop here. User reviews on dashboard.

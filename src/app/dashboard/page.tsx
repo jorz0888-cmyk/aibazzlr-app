@@ -6,6 +6,7 @@ import { countPostsByUser } from "@/lib/db/posts";
 import { checkMonthlyPostQuota, checkMonthlyImageQuota } from "@/lib/quota";
 import { PLAN_DISPLAY_NAMES } from "@/lib/plans";
 import { AutoPostTimeline } from "./AutoPostTimeline";
+import { StrategyProgress } from "./StrategyProgress";
 
 export const dynamic = "force-dynamic";
 
@@ -61,6 +62,8 @@ export default async function DashboardHome() {
         <Stat label="AI設定" value={configsCount} unit="件" />
         <Stat label="今月の自動投稿" value={publishedThisMonth} unit="件" />
       </div>
+
+      <StrategyProgress userId={user.id} />
 
       <AutoPostTimeline userId={user.id} />
 

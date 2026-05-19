@@ -6,6 +6,7 @@ import { extractDbError } from "@/lib/db/error";
 import { applyPostDefaults } from "@/lib/db/post-defaults";
 import { generatePostDraft } from "@/lib/posts/generator";
 import { autoAttachLibraryImage } from "@/lib/media/autoSelect";
+import { recordTopicTags } from "@/lib/strategy/topic-tracking";
 import type { Platform } from "@/lib/supabase/types";
 import { checkRateLimit, rateLimitedResponse } from "@/lib/rate-limit";
 import {
@@ -109,6 +110,8 @@ export async function POST(request: NextRequest) {
     generation_metadata: generated.metadata,
     media_id: picked.media_id,
     image_url: picked.image_url,
+    strategic_intent: generated.strategic_intent,
+    topic_tags: generated.topic_tags,
   });
 
   const { data, error } = await supabase
@@ -124,6 +127,12 @@ export async function POST(request: NextRequest) {
       { error: `下書きの保存に失敗しました: ${info.message}`, debug: info },
       { status: 500 },
     );
+  }
+
+  // Phase 13: bookkeeping — record the new topic tags on the AI config so
+  // the next generation knows what to avoid. Fail-soft inside the helper.
+  if (generated.topic_tags.length > 0) {
+    void recordTopicTags(supabase, aiConfig.id, generated.topic_tags);
   }
 
   return NextResponse.json({ post: data });

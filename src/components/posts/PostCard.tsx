@@ -265,6 +265,13 @@ export function PostCard({ post }: { post: PostListItem }) {
           </div>
         )}
 
+        {post.strategic_intent && (
+          <p className="flex items-start gap-1.5 rounded-md border border-line bg-white/5 p-2 text-[11px] leading-relaxed text-ink-muted">
+            <span aria-hidden>💡</span>
+            <span>{post.strategic_intent}</span>
+          </p>
+        )}
+
         {post.status === "publishing" && (
           <div className="rounded-lg border border-cyan/30 bg-cyan/5 p-3 text-xs text-cyan">
             <span className="inline-flex items-center gap-2">

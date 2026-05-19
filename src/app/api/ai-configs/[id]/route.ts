@@ -103,6 +103,10 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     // Phase 11 auto-post
     "posting_mode",
     "auto_post_enabled",
+    // Phase 13 strategy
+    "monthly_goal",
+    "target_audience_preset",
+    "target_audience_description",
   ];
   for (const key of passthrough) {
     if (key in body) {
