@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Logo } from "@/components/Logo";
 import { LogoutButton } from "@/components/LogoutButton";
 import { DashboardSidebar } from "@/components/DashboardSidebar";
+import { MobileNav } from "@/components/MobileNav";
 import { ToastProvider } from "@/components/common/Toast";
 
 export default async function DashboardLayout({
@@ -19,9 +20,12 @@ export default async function DashboardLayout({
   return (
     <ToastProvider>
       <div className="min-h-screen bg-bg">
-        <header className="sticky top-0 z-20 border-b border-line bg-bg/80 backdrop-blur">
-          <div className="flex h-14 items-center justify-between px-5">
-            <Logo size="sm" href="/dashboard" />
+        <header className="sticky top-0 z-30 border-b border-line bg-bg/80 backdrop-blur">
+          <div className="flex h-14 items-center justify-between px-4 sm:px-5">
+            <div className="flex items-center gap-2">
+              <MobileNav />
+              <Logo size="sm" href="/dashboard" />
+            </div>
             <div className="flex items-center gap-3">
               <span className="hidden text-xs text-ink-muted sm:inline">
                 {user.email}

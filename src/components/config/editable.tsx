@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Spinner } from "@/components/Spinner";
 import { TagInput } from "@/components/hearing/TagInput";
+import { useToast } from "@/components/common/Toast";
 
 type ApiError = {
   error?: string;
@@ -65,6 +66,7 @@ export function EditableText({
   placeholder?: string;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(initial ?? "");
   const [saving, setSaving] = useState(false);
@@ -76,6 +78,7 @@ export function EditableText({
     try {
       await patchConfig(configId, { [field]: value.trim() || null });
       setEditing(false);
+      toast.success("保存しました", { description: label });
       router.refresh();
     } catch (e) {
       setError(safeMsg(e, "保存に失敗しました"));
@@ -161,6 +164,7 @@ export function EditableTextarea({
   rows?: number;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(initial ?? "");
   const [saving, setSaving] = useState(false);
@@ -172,6 +176,7 @@ export function EditableTextarea({
     try {
       await patchConfig(configId, { [field]: value.trim() || null });
       setEditing(false);
+      toast.success("保存しました", { description: label });
       router.refresh();
     } catch (e) {
       setError(safeMsg(e, "保存に失敗しました"));
@@ -259,6 +264,7 @@ export function EditableTags({
   max?: number;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [editing, setEditing] = useState(false);
   const [tags, setTags] = useState<string[]>(initial);
   const [saving, setSaving] = useState(false);
@@ -270,6 +276,7 @@ export function EditableTags({
     try {
       await patchConfig(configId, { [field]: tags });
       setEditing(false);
+      toast.success("保存しました", { description: label });
       router.refresh();
     } catch (e) {
       setError(safeMsg(e, "保存に失敗しました"));
@@ -375,6 +382,7 @@ export function EditableLines({
   placeholder?: string;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [editing, setEditing] = useState(false);
   const [items, setItems] = useState<string[]>(initial);
   const [draft, setDraft] = useState("");
@@ -397,6 +405,7 @@ export function EditableLines({
     try {
       await patchConfig(configId, { [field]: items });
       setEditing(false);
+      toast.success("保存しました", { description: label });
       router.refresh();
     } catch (e) {
       setError(safeMsg(e, "保存に失敗しました"));
