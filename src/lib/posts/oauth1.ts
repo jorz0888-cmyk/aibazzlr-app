@@ -17,7 +17,9 @@ import crypto from "crypto";
 export type Oauth1Credentials = {
   consumerKey: string;
   consumerSecret: string;
+  /** Empty string for the request_token (no user token yet) step. */
   accessToken: string;
+  /** Empty string for the request_token (no user token secret yet) step. */
   accessTokenSecret: string;
 };
 
@@ -39,6 +41,7 @@ export function buildOauth1AuthHeader({
   method,
   url,
   formParams = {},
+  oauthExtras = {},
   creds,
 }: {
   method: "GET" | "POST" | "PUT" | "DELETE";
@@ -50,16 +53,29 @@ export function buildOauth1AuthHeader({
    * an empty object.
    */
   formParams?: Record<string, string>;
+  /**
+   * Additional OAuth 1.0a header params that go into BOTH the signature
+   * base AND the Authorization header — needed for the 3-legged flow's
+   * oauth_callback (request_token step) and oauth_verifier (alternative
+   * to body-passing in the access_token step).
+   */
+  oauthExtras?: Record<string, string>;
   creds: Oauth1Credentials;
 }): string {
   const oauthParams: Record<string, string> = {
     oauth_consumer_key: creds.consumerKey,
-    oauth_token: creds.accessToken,
     oauth_nonce: crypto.randomBytes(16).toString("hex"),
     oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
     oauth_signature_method: "HMAC-SHA1",
     oauth_version: "1.0",
+    ...oauthExtras,
   };
+  // Phase 15 (3-legged): the request_token step is fired BEFORE we have
+  // a user token, so oauth_token must not appear in either the header
+  // or the signature base. We treat an empty accessToken as "skip".
+  if (creds.accessToken) {
+    oauthParams.oauth_token = creds.accessToken;
+  }
 
   // Signature base — all OAuth params + form params sorted by encoded key.
   const all: Record<string, string> = { ...oauthParams, ...formParams };

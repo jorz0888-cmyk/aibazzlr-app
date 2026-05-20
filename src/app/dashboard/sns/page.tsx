@@ -44,7 +44,7 @@ export default async function SnsPage() {
         <div className="grid gap-3 lg:grid-cols-3">
           <PlatformCard
             label="X (Twitter)"
-            description="OAuth 2.0でAPIに直接連携。tweet.write権限で投稿可能。"
+            description="ボタン1つで安全に連携。AIBazzlr から自動投稿できるようになります。"
             available
             badge={`${xAccounts.length} 件接続中`}
           >

@@ -3,35 +3,22 @@
 import { useState } from "react";
 import { Spinner } from "@/components/Spinner";
 
+/**
+ * Phase 15: new connections go through the 3-legged OAuth 1.0a flow at
+ * /api/auth/x/oauth1/start (302 → X authorize page). The old OAuth 2.0
+ * route at /api/auth/x/login is intentionally left in place so accounts
+ * connected before this change keep working through the publisher's
+ * resolveXAuth() fallback.
+ */
 export function XConnectButton() {
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  async function handleConnect() {
-    setError(null);
+  function handleConnect() {
     setLoading(true);
-    try {
-      const res = await fetch("/api/auth/x/login", { method: "POST" });
-      const data = (await res.json().catch(() => ({}))) as {
-        redirect_url?: string;
-        error?: string;
-        debug?: { message?: string };
-      };
-
-      if (res.ok && data.redirect_url) {
-        window.location.href = data.redirect_url;
-        return;
-      }
-
-      const msg =
-        data.error ??
-        data.debug?.message ??
-        `連携の開始に失敗しました (HTTP ${res.status})`;
-      throw new Error(msg);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "エラーが発生しました");
-      setLoading(false);
-    }
+    // Top-level navigation — /api/auth/x/oauth1/start responds with a 302
+    // to X's authorize URL, so a fetch would not follow the redirect into
+    // a different origin.
+    window.location.href = "/api/auth/x/oauth1/start";
   }
 
   return (
@@ -57,7 +44,6 @@ export function XConnectButton() {
         )}
         {loading ? "接続中..." : "X (Twitter) を連携"}
       </button>
-      {error && <div className="text-xs text-danger">{error}</div>}
     </div>
   );
 }

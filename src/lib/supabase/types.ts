@@ -168,6 +168,30 @@ export type SocialAccount = {
 };
 
 // ---- OAuth sessions (Phase 6 — PKCE intermediate state) ------------------
+export type Oauth1Pending = {
+  oauth_token: string;
+  user_id: string;
+  oauth_token_secret_ciphertext: string;
+  oauth_token_secret_iv: string;
+  oauth_token_secret_tag: string;
+  redirect_after: string | null;
+  expires_at: string;
+  created_at: string;
+};
+
+export type Oauth1PendingInsert = Partial<
+  Omit<Oauth1Pending, "created_at" | "expires_at">
+> & {
+  oauth_token: string;
+  user_id: string;
+  oauth_token_secret_ciphertext: string;
+  oauth_token_secret_iv: string;
+  oauth_token_secret_tag: string;
+  expires_at?: string;
+};
+
+export type Oauth1PendingUpdate = Partial<Omit<Oauth1Pending, "oauth_token">>;
+
 export type OauthSession = {
   id: string;
   user_id: string;
@@ -481,6 +505,12 @@ export type Database = {
         Row: OauthSession;
         Insert: OauthSessionInsert;
         Update: OauthSessionUpdate;
+        Relationships: [];
+      };
+      oauth1_pending: {
+        Row: Oauth1Pending;
+        Insert: Oauth1PendingInsert;
+        Update: Oauth1PendingUpdate;
         Relationships: [];
       };
     };
