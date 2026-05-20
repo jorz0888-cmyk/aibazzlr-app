@@ -208,13 +208,18 @@ export function translateXError(
 }
 
 /**
- * Upload an image to X via the v1.1 media/upload endpoint (still the
- * canonical "simple upload" path even with OAuth2 user-context tokens).
- * Returns the `media_id_string` to thread into the tweet body. Caller is
- * responsible for fail-soft handling — if this throws we still want to post
- * the tweet as text only.
+ * Upload an image to X via the **v2** media/upload endpoint. The v1.1
+ * endpoint (upload.twitter.com/1.1/media/upload.json) accepts ONLY OAuth
+ * 1.0a signed requests, so calling it with our OAuth 2.0 user-context
+ * bearer triggers the famous "Your client app is not configured with the
+ * appropriate oauth1 app permissions for this endpoint" 403. v2 is OAuth
+ * 2.0 native and was made GA in 2024.
+ *
+ * Returns the media `id` string to thread into the tweet body via
+ * `{ media: { media_ids: [id] } }`. Caller is responsible for fail-soft
+ * handling — if this throws we still want to post the tweet as text only.
  */
-const X_MEDIA_UPLOAD_URL = "https://upload.twitter.com/1.1/media/upload.json";
+const X_MEDIA_UPLOAD_URL = "https://api.x.com/2/media/upload";
 
 /**
  * Print the first 8 chars of the bearer token to logs. Useful for
@@ -242,15 +247,13 @@ export async function uploadImageToX(
   const arrayBuf = await fetched.arrayBuffer();
   const bytes = new Uint8Array(arrayBuf);
 
+  const mime = fetched.headers.get("content-type") ?? "image/jpeg";
   const form = new FormData();
   // Pass as Blob so undici fills in the proper Content-Type boundary.
-  form.append(
-    "media",
-    new Blob([bytes], {
-      type: fetched.headers.get("content-type") ?? "image/jpeg",
-    }),
-    "image",
-  );
+  form.append("media", new Blob([bytes], { type: mime }), "image");
+  // v2 requires media_category for non-default types; "tweet_image" works
+  // for the JPG/PNG/WebP set we accept on upload.
+  form.append("media_category", "tweet_image");
 
   let response: Response;
   try {
@@ -287,11 +290,18 @@ export async function uploadImageToX(
     throw new XApiError(`画像アップロード失敗: ${message}`, response.status, rawDetail);
   }
 
+  // v2 response shape: { data: { id: "...", media_key: "..." } }.
+  // We also accept the v1.1 shape (media_id_string / media_id) so the
+  // same code keeps working if X temporarily flips us back.
   const json = (await response.json()) as {
+    data?: { id?: string; media_key?: string };
     media_id_string?: string;
     media_id?: number;
   };
-  const id = json.media_id_string ?? (json.media_id ? String(json.media_id) : null);
+  const id =
+    json.data?.id ??
+    json.media_id_string ??
+    (json.media_id ? String(json.media_id) : null);
   if (!id) {
     throw new XApiError(
       "X 側応答に media_id が含まれていませんでした",
