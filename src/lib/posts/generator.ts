@@ -7,6 +7,11 @@ import type { AiConfig, GenerationMetadata } from "@/lib/supabase/types";
 import { getMonthlyGoal } from "@/lib/strategy/monthly-goals";
 import { getAudiencePreset } from "@/lib/strategy/audience-presets";
 import { formatRecentTopicsForPrompt } from "@/lib/strategy/topic-tracking";
+import {
+  retryInstructionForDetection,
+  validateJapaneseOutput,
+  type DetectedRun,
+} from "./validators";
 
 const REAL_MODE_GUARD = `
 
@@ -16,6 +21,17 @@ const REAL_MODE_GUARD = `
 - 実際にない金額・年数・実績を作らない
 - 不確かな情報は使わない
 - 提供された営業時間・メニュー・価格・実話エピソードのみ使用すること`;
+
+const LANGUAGE_GUARD = `
+
+【出力言語の厳格な指定】
+- 出力は **純粋な日本語のみ**（ひらがな・カタカナ・漢字・標準的な記号・絵文字）
+- ハングル文字（누군가、안녕 など）の混入禁止
+- 半角カタカナ（ｱｲｳｴｵ など）の混入禁止
+- 罫線文字（┌┐└┘├ など）の混入禁止
+- IPA や音声記号（ɟ、ʃ など）の混入禁止
+- 中国語繁体字 / 簡体字 の混入禁止
+- 英単語は固有名詞・ブランド名・URL のみ許可`;
 
 const OUTPUT_FORMAT = `
 
@@ -123,15 +139,31 @@ ${aiConfig.world_view ?? ""}
   // configured, preserving the pre-Phase-13 prompt byte-for-byte.
   prompt += buildStrategySection(aiConfig, context);
 
+  // Phase 11.5: language guard. Always-on hint to keep the output JP-only.
+  prompt += LANGUAGE_GUARD;
+
   prompt += OUTPUT_FORMAT;
   return prompt;
 }
 
-export function buildUserPrompt(theme?: string): string {
-  if (theme && theme.trim()) {
-    return `今日の投稿を作成してください。テーマ: ${theme.trim()}`;
+export function buildUserPrompt(
+  theme?: string,
+  context?: { recentOpenings?: string[] },
+): string {
+  let base = theme && theme.trim()
+    ? `今日の投稿を作成してください。テーマ: ${theme.trim()}`
+    : "今日の投稿を作成してください。前回の投稿と異なる切り口でお願いします。";
+
+  const openings = (context?.recentOpenings ?? [])
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 10);
+  if (openings.length > 0) {
+    base += `\n\n【直近の投稿の書き出し（避けるべきパターン）】\n${openings
+      .map((s, i) => `${i + 1}. ${s}...`)
+      .join("\n")}\n\n上記と **異なる切り口・書き出し** で投稿を作ること。同じ単語・同じ語感で始まる投稿が連続しないように。`;
   }
-  return "今日の投稿を作成してください。前回の投稿と異なる切り口でお願いします。";
+  return base;
 }
 
 export type GeneratedPost = {
@@ -142,6 +174,10 @@ export type GeneratedPost = {
   topic_tags: string[];
   /** Phase 13: 1-line description of what the post is trying to do. */
   strategic_intent: string | null;
+  /** Phase 11.5: first 30 chars of content for opening-diversity tracking. */
+  opening_snippet: string;
+  /** Phase 11.5: validator failures we accepted rather than blocked on. */
+  warnings: string[];
   metadata: GenerationMetadata;
 };
 
@@ -237,41 +273,80 @@ function toStringArray(v: unknown): string[] {
 export async function generatePostDraft(
   aiConfig: AiConfig,
   theme?: string,
-  context?: { scheduledTimeJst?: string },
+  context?: { scheduledTimeJst?: string; recentOpenings?: string[] },
 ): Promise<GeneratedPost> {
   const anthropic = getAnthropic();
   const system = buildSystemPrompt(aiConfig, context);
-  const user = buildUserPrompt(theme);
+  const baseUser = buildUserPrompt(theme, { recentOpenings: context?.recentOpenings });
   const attempts: string[] = [];
+  const warnings: string[] = [];
 
+  // Phase 11.5: up to 2 attempts when the output contains foreign characters.
+  // The second attempt re-uses the cached system prompt but appends a fix-up
+  // hint to the user message describing what tripped the validator.
+  const MAX_ATTEMPTS = 2;
   let resp;
-  try {
-    resp = await anthropic.messages.create({
-      model: POST_MODEL,
-      max_tokens: 1024,
-      // Phase 7.5b: same per-AI-config system prompt is reused for every post
-      // generation. Caching lets back-to-back generations hit the 5-min cache
-      // for 90% off on input tokens. SDK 0.32 types lag the API.
-      system: [
-        {
-          type: "text",
-          text: system,
-          cache_control: { type: "ephemeral" },
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any,
-      ],
-      messages: [{ role: "user", content: user }],
+  let text = "";
+  let lastDetected: DetectedRun[] = [];
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const userMessage =
+      attempt === 0
+        ? baseUser
+        : baseUser + retryInstructionForDetection(lastDetected);
+
+    try {
+      resp = await anthropic.messages.create({
+        model: POST_MODEL,
+        max_tokens: 1024,
+        // Phase 7.5b: same per-AI-config system prompt is reused for every post
+        // generation. Caching lets back-to-back generations hit the 5-min cache
+        // for 90% off on input tokens. SDK 0.32 types lag the API.
+        system: [
+          {
+            type: "text",
+            text: system,
+            cache_control: { type: "ephemeral" },
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          } as any,
+        ],
+        messages: [{ role: "user", content: userMessage }],
+      });
+      attempts.push(attempt === 0 ? "anthropic_call" : "anthropic_retry");
+    } catch (e) {
+      throw new Error(
+        `AI生成に失敗しました: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+
+    text = resp.content
+      .map((c) => (c.type === "text" ? c.text : ""))
+      .join("");
+
+    const validation = validateJapaneseOutput(text);
+    if (validation.valid) {
+      lastDetected = [];
+      break;
+    }
+    lastDetected = validation.detected;
+    console.warn("[generator] language validation failed", {
+      attempt,
+      detected: lastDetected,
     });
-    attempts.push("anthropic_call");
-  } catch (e) {
-    throw new Error(
-      `AI生成に失敗しました: ${e instanceof Error ? e.message : String(e)}`,
-    );
+    if (attempt + 1 === MAX_ATTEMPTS) {
+      attempts.push("language_check_failed");
+      warnings.push(
+        `言語チェックで ${MAX_ATTEMPTS} 回連続失敗（${lastDetected
+          .map((d) => d.kind)
+          .join(", ")}）。出力をそのまま採用しました。`,
+      );
+    }
   }
 
-  const text = resp.content
-    .map((c) => (c.type === "text" ? c.text : ""))
-    .join("");
+  if (!resp) {
+    // Should be unreachable: catch block above throws on failure.
+    throw new Error("AI 応答が取得できませんでした");
+  }
 
   const parsed = extractJson(text);
   let content: string;
@@ -337,6 +412,8 @@ export async function generatePostDraft(
     theme: parsedTheme,
     topic_tags: topicTags,
     strategic_intent: strategicIntent,
+    opening_snippet: content.slice(0, 30),
+    warnings,
     metadata,
   };
 }

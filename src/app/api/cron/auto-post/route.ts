@@ -173,12 +173,25 @@ async function processSchedule(
 
   // 1. Generate the draft via Claude. Phase 13: pass the scheduled JST clock
   //    so the strategy section can flag "this is an optimal time" for the
-  //    configured goal.
+  //    configured goal. Phase 11.5: also pass the last 10 opening snippets
+  //    so the generator avoids repeating its openings.
   const scheduledTimeJst = `${String(schedule.hour).padStart(2, "0")}:${String(schedule.minute).padStart(2, "0")}`;
+  const { data: recentOpeningsRows } = await admin
+    .from("posts")
+    .select("opening_snippet")
+    .eq("ai_config_id", config.id)
+    .not("opening_snippet", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(10);
+  const recentOpenings = (recentOpeningsRows ?? [])
+    .map((r) => r.opening_snippet)
+    .filter((s): s is string => typeof s === "string" && s.length > 0);
+
   let generated;
   try {
     generated = await generatePostDraft(config, undefined, {
       scheduledTimeJst,
+      recentOpenings,
     });
   } catch (e) {
     console.error("[cron/auto-post] generation failed", {
@@ -228,6 +241,7 @@ async function processSchedule(
     image_url: picked.image_url,
     strategic_intent: generated.strategic_intent,
     topic_tags: generated.topic_tags,
+    opening_snippet: generated.opening_snippet,
   });
 
   const { data: inserted, error: insertErr } = await admin

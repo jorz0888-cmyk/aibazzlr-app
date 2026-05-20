@@ -9,10 +9,12 @@ const WEEKDAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const WEEKDAYS_ALL = [0, 1, 2, 3, 4, 5, 6];
 const WEEKDAYS_WEEKDAYS = [1, 2, 3, 4, 5];
 
+import { friendlyErrorMessage } from "@/lib/errors/client";
+
 async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init);
-  const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+  const data = (await res.json().catch(() => ({}))) as T;
+  if (!res.ok) throw new Error(friendlyErrorMessage(data));
   return data;
 }
 

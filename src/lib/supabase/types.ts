@@ -289,6 +289,8 @@ export type Post = {
   // Phase 13: strategy + topic tags
   strategic_intent: string | null;
   topic_tags: string[];
+  // Phase 11.5: first 30 chars of content for opening-diversity tracking
+  opening_snippet: string | null;
   // Legacy column (kept for back-compat)
   external_post_id: string | null;
   /** All engagement metrics live in this jsonb (likes/retweets/etc). */

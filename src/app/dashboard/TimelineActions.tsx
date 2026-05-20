@@ -4,19 +4,21 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Spinner } from "@/components/Spinner";
 
+import { friendlyErrorMessage } from "@/lib/errors/client";
+
 async function postJson(path: string): Promise<void> {
   const res = await fetch(path, { method: "POST" });
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? `HTTP ${res.status}`);
+    const body = await res.json().catch(() => ({}));
+    throw new Error(friendlyErrorMessage(body));
   }
 }
 
 async function deleteJson(path: string): Promise<void> {
   const res = await fetch(path, { method: "DELETE" });
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? `HTTP ${res.status}`);
+    const body = await res.json().catch(() => ({}));
+    throw new Error(friendlyErrorMessage(body));
   }
 }
 

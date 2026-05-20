@@ -70,10 +70,26 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Phase 11.5: gather the last 10 opening snippets for this AI config so
+  // the generator can avoid repeating openings. Best-effort — empty array
+  // on any read failure.
+  const { data: recentOpeningsRows } = await supabase
+    .from("posts")
+    .select("opening_snippet")
+    .eq("ai_config_id", aiConfig.id)
+    .not("opening_snippet", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(10);
+  const recentOpenings = (recentOpeningsRows ?? [])
+    .map((r) => r.opening_snippet)
+    .filter((s): s is string => typeof s === "string" && s.length > 0);
+
   // 1. Generate via Claude
   let generated;
   try {
-    generated = await generatePostDraft(aiConfig, body.theme);
+    generated = await generatePostDraft(aiConfig, body.theme, {
+      recentOpenings,
+    });
   } catch (e) {
     console.error("[POSTS-GENERATE] AI failure", e);
     return NextResponse.json(
@@ -112,6 +128,7 @@ export async function POST(request: NextRequest) {
     image_url: picked.image_url,
     strategic_intent: generated.strategic_intent,
     topic_tags: generated.topic_tags,
+    opening_snippet: generated.opening_snippet,
   });
 
   const { data, error } = await supabase

@@ -17,15 +17,17 @@ function formatJpy(amount: number): string {
   return `¥${amount.toLocaleString("ja-JP")}`;
 }
 
+import { friendlyErrorMessage } from "@/lib/errors/client";
+
 async function postJson<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
   });
-  const data = (await res.json().catch(() => ({}))) as T & { error?: string };
+  const data = (await res.json().catch(() => ({}))) as T;
   if (!res.ok) {
-    throw new Error(data.error ?? `HTTP ${res.status}`);
+    throw new Error(friendlyErrorMessage(data));
   }
   return data;
 }

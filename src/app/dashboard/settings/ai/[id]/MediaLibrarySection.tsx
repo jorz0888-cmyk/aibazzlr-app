@@ -4,10 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Spinner } from "@/components/Spinner";
 import type { MediaLibraryRow } from "@/lib/supabase/types";
 
+import { friendlyErrorMessage } from "@/lib/errors/client";
+
 async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init);
-  const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+  const data = (await res.json().catch(() => ({}))) as T;
+  if (!res.ok) throw new Error(friendlyErrorMessage(data));
   return data;
 }
 

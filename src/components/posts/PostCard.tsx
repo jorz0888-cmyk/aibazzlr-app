@@ -8,6 +8,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { PostEditorModal } from "./PostEditorModal";
 import { PublishConfirmDialog } from "./PublishConfirmDialog";
 import type { PostListItem } from "./types";
+import { friendlyErrorMessage } from "@/lib/errors/client";
 
 // stuck = publishing status held for more than this. The pg_cron cleanup job
 // runs at the same threshold (5 min), so this UI warning means
@@ -73,7 +74,7 @@ export function PostCard({ post }: { post: PostListItem }) {
         url?: string;
         tweet_id?: string;
       };
-      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      if (!res.ok) throw new Error(friendlyErrorMessage(body));
 
       setConfirming(false);
       toast.success("投稿が完了しました", {
@@ -132,7 +133,7 @@ export function PostCard({ post }: { post: PostListItem }) {
         url?: string;
         warning?: string;
       };
-      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      if (!res.ok) throw new Error(friendlyErrorMessage(body));
       toast.success("再投稿に成功しました", {
         description: `@${username} に送信されました`,
         action: body.url
@@ -154,8 +155,8 @@ export function PostCard({ post }: { post: PostListItem }) {
     try {
       const res = await fetch(`/api/posts/${post.id}`, { method: "DELETE" });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `HTTP ${res.status}`);
+        const body = await res.json().catch(() => ({}));
+        throw new Error(friendlyErrorMessage(body));
       }
       setDeleteOpen(false);
       toast.info("投稿を削除しました");
