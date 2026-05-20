@@ -8,9 +8,12 @@ import {
   extForMime,
   uploadToUserMedia,
 } from "@/lib/media/storage";
+import { analyzeImageWithVision, mergeTags } from "@/lib/media/vision";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// Bumped from 60s — multi-file uploads now run Vision per file synchronously.
+// 10 files @ 2-3s each + storage saves still fits comfortably under 300s.
+export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -126,6 +129,32 @@ export async function POST(request: NextRequest) {
     if (error) {
       console.error("[media/upload] db insert failed", error);
       return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    // Phase 12.1: ask Gemini Vision to label the image. Synchronous so the
+    // returned row already carries tags + description. Fail-soft — any
+    // problem leaves the row with just the user-supplied tags.
+    try {
+      const vision = await analyzeImageWithVision(publicUrl);
+      if (vision) {
+        const mergedTags = mergeTags(row.tags ?? initialTags, vision.tags);
+        const { data: updated } = await supabase
+          .from("media_library")
+          .update({
+            tags: mergedTags,
+            ai_description: vision.description || row.ai_description,
+          })
+          .eq("id", row.id)
+          .eq("user_id", user.id)
+          .select("*")
+          .single();
+        if (updated) {
+          uploaded.push(updated);
+          continue;
+        }
+      }
+    } catch (e) {
+      console.warn("[media/upload] vision step failed (non-fatal)", e);
     }
     uploaded.push(row);
   }

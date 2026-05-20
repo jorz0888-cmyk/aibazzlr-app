@@ -90,13 +90,18 @@ export function MediaLibrarySection({
 
   return (
     <section className="card space-y-4 p-5 transition hover:border-cyan/20">
-      <header>
-        <h2 className="text-sm font-bold uppercase tracking-wider text-ink-muted">
-          写真ライブラリ
-        </h2>
-        <p className="mt-1 text-[11px] text-ink-subtle">
-          写真をアップロードすると、AI が投稿内容に合う1枚を自動で選んで添付します。
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-bold uppercase tracking-wider text-ink-muted">
+            写真ライブラリ
+          </h2>
+          <p className="mt-1 text-[11px] text-ink-subtle">
+            写真をアップロードすると、AI が自動でタグ付け→投稿内容に合う1枚を選んで添付します。
+          </p>
+        </div>
+        {items && items.some((m) => !m.ai_description) && (
+          <BackfillButton onDone={reload} />
+        )}
       </header>
 
       <div
@@ -179,7 +184,18 @@ export function MediaLibrarySection({
                   )}
                 </div>
                 <p className="truncate px-2 py-1 text-[11px] text-ink-muted">
-                  {it.tags[0] ?? "(タグなし)"}
+                  {it.tags.length === 0
+                    ? "(タグなし)"
+                    : it.tags.length === 1
+                      ? it.tags[0]
+                      : (
+                        <>
+                          {it.tags[0]}
+                          <span className="ml-1 text-ink-subtle">
+                            +{it.tags.length - 1}
+                          </span>
+                        </>
+                      )}
                 </p>
               </button>
             </li>
@@ -202,6 +218,67 @@ export function MediaLibrarySection({
         />
       )}
     </section>
+  );
+}
+
+function BackfillButton({ onDone }: { onDone: () => void | Promise<void> }) {
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<
+    | null
+    | { processed: number; succeeded: number; failed: number; remaining: number }
+  >(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function run() {
+    setErr(null);
+    setRunning(true);
+    setProgress(null);
+    try {
+      let total = { processed: 0, succeeded: 0, failed: 0 };
+      let remaining = 0;
+      // Re-run batches until nothing's left without ai_description.
+      for (let round = 0; round < 20; round++) {
+        const data = await jsonFetch<{
+          processed: number;
+          succeeded: number;
+          failed: number;
+          remaining_after_batch: number;
+        }>("/api/media/backfill-tags", { method: "POST" });
+        total = {
+          processed: total.processed + data.processed,
+          succeeded: total.succeeded + data.succeeded,
+          failed: total.failed + data.failed,
+        };
+        remaining = data.remaining_after_batch;
+        setProgress({ ...total, remaining });
+        if (data.processed === 0 || remaining === 0) break;
+      }
+      await onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "失敗しました");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <button
+        type="button"
+        className="btn-secondary text-xs"
+        onClick={run}
+        disabled={running}
+      >
+        {running ? <Spinner /> : "🔄 全写真にタグを自動付与"}
+      </button>
+      {progress && (
+        <p className="font-mono text-[10px] text-ink-subtle">
+          {progress.succeeded} 成功 / {progress.failed} 失敗
+          {progress.remaining > 0 ? ` / 残り ${progress.remaining}` : ""}
+        </p>
+      )}
+      {err && <p className="text-[10px] text-danger">{err}</p>}
+    </div>
   );
 }
 
