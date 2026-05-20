@@ -439,7 +439,7 @@ export function AutoPostSection({
           : postingMode === "approval"
             ? "ダッシュボード上で承認を求めます。承認時に X API 経由で投稿します。"
             : "ダッシュボードに「コピペ待ち」として表示します。本文をコピーして自分で X に投稿してください。"}
-        月の投稿上限（Free 10 件 / Standard 150 件 / Premium 450 件）に達した場合は
+        月の投稿上限（Free 10 件 / Standard 60 件 / Premium 150 件）に達した場合は
         自動的にスキップされます。
       </p>
     </section>

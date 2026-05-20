@@ -14,20 +14,22 @@ export const PLAN_LIMITS = {
     ai_images_per_month: 0, // Free users can upload, but cannot generate
   },
   standard: {
-    posts_per_month: 150,
+    // Phase 11.5-B: realigned with actual usage (1-2 posts/day, not 5).
+    posts_per_month: 60,
     ai_configs_max: 3,
     social_accounts_max: 1,
     hearings_per_day: 3,
     test_posts_per_day: 10,
-    ai_images_per_month: 30,
+    ai_images_per_month: 20,
   },
   premium: {
-    posts_per_month: 450,
+    // Phase 11.5-B: realigned with actual usage (~5 posts/day).
+    posts_per_month: 150,
     ai_configs_max: 999, // effectively unlimited
     social_accounts_max: 1,
     hearings_per_day: 10,
     test_posts_per_day: 20,
-    ai_images_per_month: 100,
+    ai_images_per_month: 50,
   },
 } as const;
 
@@ -51,13 +53,15 @@ export const PLAN_FEATURES: Record<Plan, string[]> = {
     "クレカ登録不要",
   ],
   standard: [
-    "月150投稿まで（1日5投稿目安）",
+    "月60投稿まで（1日2投稿目安）",
+    "AI画像生成 月20枚",
     "AI設定 3つまで",
     "X アカウント 1つ連携",
     "全機能利用可能",
   ],
   premium: [
-    "月450投稿まで（1日15投稿目安）",
+    "月150投稿まで（1日5投稿目安）",
+    "AI画像生成 月50枚",
     "AI設定 無制限",
     "X アカウント 1つ連携",
     "全機能 + 早期アクセス",
