@@ -31,7 +31,9 @@ export const maxDuration = 300;
  * manual smoke tests via curl).
  */
 export async function GET(request: NextRequest) {
+  console.log("[cron/auto-post] ====== 実行開始 ======");
   if (!isAuthorized(request)) {
+    console.warn("[cron/auto-post] auth failed");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -43,6 +45,18 @@ export async function GET(request: NextRequest) {
   const currentHour = jst.getUTCHours();
   const currentMinute = jst.getUTCMinutes();
   const currentWeekday = jst.getUTCDay();
+  const jstClock = `${String(currentHour).padStart(2, "0")}:${String(currentMinute).padStart(2, "0")}`;
+  const weekdayLabel = ["日", "月", "火", "水", "木", "金", "土"][currentWeekday];
+
+  console.log("[cron/auto-post] UTC raw     :", nowUtc.toISOString());
+  console.log(
+    "[cron/auto-post] UTC h:m     :",
+    `${nowUtc.getUTCHours()}:${nowUtc.getUTCMinutes()}`,
+  );
+  console.log(
+    "[cron/auto-post] JST 換算    :",
+    `${jstClock}  (weekday=${currentWeekday} / ${weekdayLabel})`,
+  );
 
   // 2. Find schedules that fire at exactly this minute (in JST).
   const { data: schedules, error: schedulesErr } = await admin
@@ -60,26 +74,62 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const eligible = (schedules ?? []).filter((s: Schedule) =>
-    (s.weekdays ?? []).includes(currentWeekday),
+  console.log(
+    `[cron/auto-post] 取得 schedules: ${schedules?.length ?? 0} 件`,
+    JSON.stringify(
+      (schedules ?? []).map((s) => ({
+        id: s.id,
+        ai_config_id: s.ai_config_id,
+        hour: s.hour,
+        minute: s.minute,
+        weekdays: s.weekdays,
+        enabled: s.enabled,
+      })),
+    ),
   );
 
+  const eligible = (schedules ?? []).filter((s: Schedule) => {
+    const weekdayMatch = (s.weekdays ?? []).includes(currentWeekday);
+    if (!weekdayMatch) {
+      console.log(
+        `[cron/auto-post] 照合: schedule ${s.id} ${String(s.hour).padStart(2, "0")}:${String(s.minute).padStart(2, "0")} weekdays=${JSON.stringify(s.weekdays)} vs now=${jstClock} weekday=${currentWeekday} → 一致せず（曜日対象外）`,
+      );
+      return false;
+    }
+    console.log(
+      `[cron/auto-post] 照合: schedule ${s.id} ${String(s.hour).padStart(2, "0")}:${String(s.minute).padStart(2, "0")} vs now=${jstClock} → 一致 ✓`,
+    );
+    return true;
+  });
+
   if (eligible.length === 0) {
+    console.log(
+      "[cron/auto-post] スキップ: 該当 schedule なし（時刻・曜日いずれかが不一致）",
+    );
     return NextResponse.json({
       status: "no_schedules",
-      time: `${currentHour}:${String(currentMinute).padStart(2, "0")}`,
+      time: jstClock,
       weekday: currentWeekday,
     });
   }
 
+  console.log(
+    `[cron/auto-post] eligible: ${eligible.length} 件、processSchedule に進む`,
+  );
   const results: Array<Record<string, unknown>> = [];
   for (const schedule of eligible) {
-    results.push(await processSchedule(admin, schedule));
+    const r = await processSchedule(admin, schedule);
+    console.log(
+      `[cron/auto-post] schedule ${schedule.id} 結果: status=${r.status}`,
+      r,
+    );
+    results.push(r);
   }
 
+  console.log("[cron/auto-post] ====== 実行完了 ======");
   return NextResponse.json({
     status: "completed",
-    time: `${currentHour}:${String(currentMinute).padStart(2, "0")}`,
+    time: jstClock,
     weekday: currentWeekday,
     processed: results.length,
     results,
@@ -116,6 +166,9 @@ async function processSchedule(
       .gte("created_at", minuteFloor)
       .limit(1);
     if (recent && recent.length > 0) {
+      console.log(
+        `[cron/auto-post] スキップ: schedule ${schedule.id} は直近5分以内に既に処理済み`,
+      );
       return { schedule_id: schedule.id, status: "already_processed" };
     }
   } catch (e) {
@@ -143,6 +196,9 @@ async function processSchedule(
   // Guard C: monthly quota.
   const quota = await checkMonthlyPostQuota(schedule.user_id);
   if (!quota.allowed) {
+    console.log(
+      `[cron/auto-post] スキップ: schedule ${schedule.id} 月次クォータ超過 (${quota.used}/${quota.limit})`,
+    );
     return {
       schedule_id: schedule.id,
       status: "quota_exceeded",
@@ -173,6 +229,9 @@ async function processSchedule(
         .maybeSingle()
     ).data;
   if (!target) {
+    console.log(
+      `[cron/auto-post] スキップ: schedule ${schedule.id} に紐づく user ${schedule.user_id} の X アカウント連携なし`,
+    );
     return {
       schedule_id: schedule.id,
       status: "no_social_account",
