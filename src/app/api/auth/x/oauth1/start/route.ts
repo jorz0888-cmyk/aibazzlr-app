@@ -31,12 +31,22 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Derive the callback URL from this request's origin so previews +
-  // local dev work without touching env vars.
-  const callbackUrl = new URL(
-    "/api/auth/x/oauth1/callback",
-    request.nextUrl.origin,
-  ).toString();
+  // X OAuth 1.0a is byte-strict about oauth_callback matching the value
+  // registered in the Developer Portal. request.nextUrl.origin proved
+  // unreliable behind Vercel's proxy layer (preview deploys, host header
+  // quirks) — X returned 403 / code 415 "Callback URL not approved" any
+  // time the two strings didn't agree. Anchor on NEXT_PUBLIC_SITE_URL
+  // with the production host as the hardcoded fallback (the one we have
+  // actually registered).
+  const baseUrl = (
+    process.env.NEXT_PUBLIC_SITE_URL ?? "https://app.aibazzlr.com"
+  ).replace(/\/+$/, "");
+  const callbackUrl = `${baseUrl}/api/auth/x/oauth1/callback`;
+  console.log("[oauth1/start] callbackUrl resolved", {
+    callbackUrl,
+    requestOrigin: request.nextUrl.origin,
+    hasEnv: Boolean(process.env.NEXT_PUBLIC_SITE_URL),
+  });
 
   const redirectAfter =
     request.nextUrl.searchParams.get("redirect_after") ?? "/dashboard/sns";
