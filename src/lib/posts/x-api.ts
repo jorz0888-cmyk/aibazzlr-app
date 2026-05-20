@@ -1,4 +1,37 @@
+import { buildOauth1AuthHeader, type Oauth1Credentials } from "./oauth1";
+
 const X_TWEETS_URL = "https://api.x.com/2/tweets";
+
+/**
+ * Phase 15 auth bundle. Callers pass either an OAuth 2.0 bearer (legacy)
+ * or an OAuth 1.0a credentials set (preferred — matches n8n's known-good
+ * config). publisher.ts picks based on what's saved on the account.
+ */
+export type XAuth =
+  | { kind: "oauth2"; accessToken: string }
+  | { kind: "oauth1"; creds: Oauth1Credentials };
+
+function buildAuthHeader(
+  auth: XAuth,
+  method: "GET" | "POST",
+  url: string,
+  formParams: Record<string, string> = {},
+): string {
+  if (auth.kind === "oauth2") return `Bearer ${auth.accessToken}`;
+  return buildOauth1AuthHeader({
+    method,
+    url,
+    formParams,
+    creds: auth.creds,
+  });
+}
+
+function authFingerprint(auth: XAuth): string {
+  if (auth.kind === "oauth2") {
+    return `oauth2/${auth.accessToken.slice(0, 8)}…(len=${auth.accessToken.length})`;
+  }
+  return `oauth1/consumer=${auth.creds.consumerKey.slice(0, 6)}…/token=${auth.creds.accessToken.slice(0, 8)}…`;
+}
 
 export type XTweetResponse = {
   id: string;
@@ -208,31 +241,19 @@ export function translateXError(
 }
 
 /**
- * Upload an image to X via the **v2** media/upload endpoint. The v1.1
- * endpoint (upload.twitter.com/1.1/media/upload.json) accepts ONLY OAuth
- * 1.0a signed requests, so calling it with our OAuth 2.0 user-context
- * bearer triggers the famous "Your client app is not configured with the
- * appropriate oauth1 app permissions for this endpoint" 403. v2 is OAuth
- * 2.0 native and was made GA in 2024.
+ * Phase 15: route media upload to the endpoint each auth flavour
+ * actually supports.
+ *   - OAuth 1.0a → v1.1 upload.twitter.com (the path n8n proved works)
+ *   - OAuth 2.0  → v2 api.x.com (only one v2 will accept Bearer)
  *
- * Returns the media `id` string to thread into the tweet body via
- * `{ media: { media_ids: [id] } }`. Caller is responsible for fail-soft
- * handling — if this throws we still want to post the tweet as text only.
+ * The 403 "oauth1 app permissions" error happens specifically when these
+ * are crossed — that was the original bug.
  */
-const X_MEDIA_UPLOAD_URL = "https://api.x.com/2/media/upload";
-
-/**
- * Print the first 8 chars of the bearer token to logs. Useful for
- * distinguishing "I sent a real user-context OAuth2 token" vs "I sent the
- * App-only bearer" without exposing the secret in full.
- */
-function tokenFingerprint(token: string): string {
-  const trimmed = token.trim();
-  return `${trimmed.slice(0, 8)}…(len=${trimmed.length})`;
-}
+const X_MEDIA_UPLOAD_V1_URL = "https://upload.twitter.com/1.1/media/upload.json";
+const X_MEDIA_UPLOAD_V2_URL = "https://api.x.com/2/media/upload";
 
 export async function uploadImageToX(
-  accessToken: string,
+  auth: XAuth,
   imageUrl: string,
 ): Promise<string> {
   // Fetch the image bytes ourselves first (Supabase public URL → bytes →
@@ -251,16 +272,22 @@ export async function uploadImageToX(
   const form = new FormData();
   // Pass as Blob so undici fills in the proper Content-Type boundary.
   form.append("media", new Blob([bytes], { type: mime }), "image");
-  // v2 requires media_category for non-default types; "tweet_image" works
-  // for the JPG/PNG/WebP set we accept on upload.
-  form.append("media_category", "tweet_image");
+  if (auth.kind === "oauth2") {
+    // v2 requires media_category for non-default types.
+    form.append("media_category", "tweet_image");
+  }
+
+  const uploadUrl =
+    auth.kind === "oauth1" ? X_MEDIA_UPLOAD_V1_URL : X_MEDIA_UPLOAD_V2_URL;
 
   let response: Response;
   try {
-    response = await fetch(X_MEDIA_UPLOAD_URL, {
+    response = await fetch(uploadUrl, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${accessToken}`,
+        // Multipart bodies are NOT part of the OAuth 1.0a signature base —
+        // pass empty formParams.
+        Authorization: buildAuthHeader(auth, "POST", uploadUrl),
       },
       body: form,
     });
@@ -275,8 +302,8 @@ export async function uploadImageToX(
     const rawText = await response.text().catch(() => "");
     console.error("[x-api] uploadImageToX failed", {
       status: response.status,
-      url: X_MEDIA_UPLOAD_URL,
-      tokenFingerprint: tokenFingerprint(accessToken),
+      url: uploadUrl,
+      auth: authFingerprint(auth),
       contentType: response.headers.get("content-type"),
       body: rawText.slice(0, 1000),
     });
@@ -312,7 +339,7 @@ export async function uploadImageToX(
 }
 
 export async function postToX(
-  accessToken: string,
+  auth: XAuth,
   text: string,
   mediaIds?: string[],
 ): Promise<XTweetResponse> {
@@ -325,7 +352,9 @@ export async function postToX(
     response = await fetch(X_TWEETS_URL, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${accessToken}`,
+        // OAuth 1.0a does NOT include JSON bodies in its signature base,
+        // so we pass empty formParams.
+        Authorization: buildAuthHeader(auth, "POST", X_TWEETS_URL),
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
@@ -342,7 +371,7 @@ export async function postToX(
     console.error("[x-api] postToX failed", {
       status: response.status,
       url: X_TWEETS_URL,
-      tokenFingerprint: tokenFingerprint(accessToken),
+      auth: authFingerprint(auth),
       contentType: response.headers.get("content-type"),
       hasMedia: (mediaIds?.length ?? 0) > 0,
       body: rawText.slice(0, 1000),

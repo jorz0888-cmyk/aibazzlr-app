@@ -143,6 +143,16 @@ export type SocialAccount = {
   refresh_token_iv: string | null;
   refresh_token_tag: string | null;
   token_expires_at: string | null;
+  // Phase 15: OAuth 1.0a User Context tokens (per-account, encrypted).
+  // Optional — when present we publish via OAuth 1.0a which our X App
+  // supports for both v2 tweets and v1.1 media; falls back to the
+  // existing OAuth 2.0 path when null.
+  oauth1_access_token: string | null;
+  oauth1_access_token_iv: string | null;
+  oauth1_access_token_tag: string | null;
+  oauth1_access_token_secret: string | null;
+  oauth1_access_token_secret_iv: string | null;
+  oauth1_access_token_secret_tag: string | null;
   scopes: string[] | null;
   token_type: string | null;
   platform_user_id: string | null;

@@ -8,9 +8,58 @@ import {
   postToX,
   uploadImageToX,
   XApiError,
+  type XAuth,
 } from "@/lib/posts/x-api";
-import type { Post } from "@/lib/supabase/types";
+import { readEnvOauth1Consumer } from "@/lib/posts/oauth1";
+import { decryptToken } from "@/lib/oauth/encryption";
+import type { Post, SocialAccount } from "@/lib/supabase/types";
 import type { DBClient } from "@/lib/db/_client-type";
+
+/**
+ * Pick the right X auth for an account. When the row has OAuth 1.0a tokens
+ * stored (Phase 15) and X_CONSUMER_KEY/SECRET are present in the env, we
+ * use the OAuth 1.0a path that n8n proved works against both /2/tweets
+ * and /1.1/media/upload. Otherwise fall through to the existing OAuth 2.0
+ * Bearer flow.
+ */
+async function resolveXAuth(
+  supabase: DBClient,
+  account: SocialAccount,
+  userId: string,
+): Promise<XAuth> {
+  const consumer = readEnvOauth1Consumer();
+  if (
+    consumer &&
+    account.oauth1_access_token &&
+    account.oauth1_access_token_iv &&
+    account.oauth1_access_token_tag &&
+    account.oauth1_access_token_secret &&
+    account.oauth1_access_token_secret_iv &&
+    account.oauth1_access_token_secret_tag
+  ) {
+    const accessToken = decryptToken({
+      ciphertext: account.oauth1_access_token,
+      iv: account.oauth1_access_token_iv,
+      tag: account.oauth1_access_token_tag,
+    });
+    const accessTokenSecret = decryptToken({
+      ciphertext: account.oauth1_access_token_secret,
+      iv: account.oauth1_access_token_secret_iv,
+      tag: account.oauth1_access_token_secret_tag,
+    });
+    return {
+      kind: "oauth1",
+      creds: {
+        consumerKey: consumer.consumerKey,
+        consumerSecret: consumer.consumerSecret,
+        accessToken,
+        accessTokenSecret,
+      },
+    };
+  }
+  const accessToken = await getValidAccessToken(supabase, account.id, userId);
+  return { kind: "oauth2", accessToken };
+}
 
 export type PublishResult =
   | {
@@ -83,12 +132,11 @@ export async function publishPostToX(
     };
   }
 
-  // Phase 7-2: getValidAccessToken auto-refreshes the token if it's near
-  // expiry. On unrecoverable failure (refresh_token dead) it also marks
-  // the account as `token_invalid` so the UI can prompt re-auth.
-  let accessToken: string;
+  // Phase 7-2 + Phase 15: prefer OAuth 1.0a when oauth1 tokens are stored
+  // on the account; otherwise fall back to the OAuth 2.0 refresh-aware path.
+  let auth: XAuth;
   try {
-    accessToken = await getValidAccessToken(supabase, account.id, userId);
+    auth = await resolveXAuth(supabase, account, userId);
   } catch (e) {
     return {
       ok: false,
@@ -96,6 +144,11 @@ export async function publishPostToX(
       status: null,
     };
   }
+  console.log("[publisher] using X auth", {
+    accountId: account.id,
+    username: account.username,
+    kind: auth.kind,
+  });
 
   // Phase 12: attach the image if the draft has one. Fail-soft — if the
   // media upload fails, we still want to post the tweet as text only so
@@ -103,7 +156,7 @@ export async function publishPostToX(
   let mediaIds: string[] | undefined;
   if (post.image_url) {
     try {
-      const mediaId = await uploadImageToX(accessToken, post.image_url);
+      const mediaId = await uploadImageToX(auth, post.image_url);
       mediaIds = [mediaId];
     } catch (e) {
       console.warn(
@@ -114,7 +167,7 @@ export async function publishPostToX(
   }
 
   try {
-    const tweet = await postToX(accessToken, tweetText, mediaIds);
+    const tweet = await postToX(auth, tweetText, mediaIds);
     return {
       ok: true,
       tweetId: tweet.id,
