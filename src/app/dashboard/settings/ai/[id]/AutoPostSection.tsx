@@ -256,6 +256,33 @@ export function AutoPostSection({
         </label>
       </header>
 
+      {/* Surface the common double-gate trap: schedules exist but the master
+          toggle is still OFF. Without this warning the schedule rows
+          looked active while cron silently skipped them at Guard B. */}
+      {!autoPostEnabled &&
+        schedules !== null &&
+        schedules.some((s) => s.enabled) && (
+          <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-xs text-warning">
+            <p className="font-bold">
+              ⚠ 自動投稿が無効です — スケジュールは発火しません
+            </p>
+            <p className="mt-1 text-ink-muted">
+              下のスケジュールは登録済みですが、上の「自動投稿 有効」を ON
+              にしないと cron は実行を見送ります。
+            </p>
+            <button
+              type="button"
+              className="btn-primary mt-2 text-xs"
+              onClick={() => {
+                setAutoPostEnabled(true);
+                void savePostingSettings({ enabled: true });
+              }}
+            >
+              いますぐ有効化する
+            </button>
+          </div>
+        )}
+
       <div className="space-y-3">
         <p className="label !mb-1">投稿モード</p>
         <div className="grid gap-3 sm:grid-cols-3">

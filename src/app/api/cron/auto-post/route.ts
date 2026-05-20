@@ -126,8 +126,16 @@ async function processSchedule(
   // Guard B: auto-post must be enabled on the AI config.
   const config: AiConfig | null = await getAiConfigById(admin, schedule.ai_config_id);
   if (!config || !config.auto_post_enabled) {
+    // Include config name so Vercel logs reveal the offender at a glance.
+    console.info("[cron/auto-post] skipped — auto_post_enabled is OFF", {
+      schedule_id: schedule.id,
+      ai_config_id: schedule.ai_config_id,
+      config_name: config?.name ?? null,
+    });
     return {
       schedule_id: schedule.id,
+      ai_config_id: schedule.ai_config_id,
+      config_name: config?.name ?? null,
       status: "auto_post_disabled",
     };
   }
