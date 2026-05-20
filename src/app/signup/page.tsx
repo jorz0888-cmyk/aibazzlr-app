@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { AuthShell } from "@/components/AuthShell";
 import { GoogleButton } from "@/components/GoogleButton";
 import { Spinner } from "@/components/Spinner";
+import { ErrorDisplay } from "@/components/ui/ErrorDisplay";
 
 type Strength = { label: string; color: string; pct: number };
 
@@ -32,7 +33,13 @@ export default function SignupPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  // `code` routes through the i18n error catalogue (with optional CTA link);
+  // `message` is the plain-string fallback for codes the catalogue doesn't
+  // know about (validation, raw Supabase errors).
+  const [error, setError] = useState<{
+    code?: string;
+    message?: string;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
 
   const strength = scorePassword(password);
@@ -42,13 +49,13 @@ export default function SignupPage() {
     setError(null);
 
     if (password.length < 8) {
-      setError("パスワードは8文字以上で設定してください。");
+      setError({ message: "パスワードは8文字以上で設定してください。" });
       return;
     }
 
     setLoading(true);
     const supabase = createClient();
-    const { error } = await supabase.auth.signUp({
+    const { data, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -56,8 +63,26 @@ export default function SignupPage() {
       },
     });
 
-    if (error) {
-      setError(translate(error.message));
+    if (signUpError) {
+      // Some Supabase deployments DO return a "User already registered"
+      // error directly — translate it to our catalogue code so the user
+      // gets the ログイン画面へ link CTA as well.
+      if (signUpError.message.toLowerCase().includes("already")) {
+        setError({ code: "email_already_registered" });
+      } else {
+        setError({ message: translate(signUpError.message) });
+      }
+      setLoading(false);
+      return;
+    }
+
+    // Supabase's "secure email signups" returns data.user with an empty
+    // `identities` array when the address is already registered. There is
+    // no `error`, no email is sent, and the user otherwise sits on
+    // /confirm-email forever waiting for a mail that never arrives. Detect
+    // that case here and surface the same friendly login-CTA error.
+    if (data?.user && (data.user.identities?.length ?? 0) === 0) {
+      setError({ code: "email_already_registered" });
       setLoading(false);
       return;
     }
@@ -127,7 +152,9 @@ export default function SignupPage() {
           )}
         </div>
 
-        {error && <div className="err">{error}</div>}
+        {error && (
+          <ErrorDisplay code={error.code} fallbackMessage={error.message} />
+        )}
 
         <button type="submit" disabled={loading} className="btn-primary w-full">
           {loading ? <Spinner /> : "登録してメール確認に進む"}

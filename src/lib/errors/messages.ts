@@ -18,6 +18,7 @@ export type ErrorCode =
   | "gemini_quota_exceeded"
   | "gemini_not_configured"
   | "subscription_required"
+  | "email_already_registered"
   | "internal_server_error";
 
 export type ErrorMessage = {
@@ -85,6 +86,12 @@ export const ERROR_MESSAGES: Record<ErrorCode, ErrorMessage> = {
     description:
       "この機能をご利用いただくには、Standard または Premium プランへの加入が必要です。",
     cta: { label: "プランを見る", href: "/dashboard/billing" },
+  },
+  email_already_registered: {
+    title: "このメールアドレスは既に登録されています",
+    description:
+      "ログイン画面からアクセスするか、別のメールアドレスをご利用ください。",
+    cta: { label: "ログイン画面へ", href: "/login" },
   },
   internal_server_error: {
     title: "エラーが発生しました",
