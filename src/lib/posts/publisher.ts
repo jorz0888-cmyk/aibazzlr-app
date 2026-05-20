@@ -70,7 +70,11 @@ export async function publishPostToX(
 
   let tweetText: string;
   try {
-    tweetText = buildTweetText(post.content, post.hashtags ?? []);
+    // Disable the client-side length cap — the generator already enforces
+    // ai_configs.max_post_length, and for posts that slip past that the X
+    // server is the final authority. Hard-coding 280 here was a regression
+    // against Phase 14's per-config caps (1k / 4k / 25k for Premium tiers).
+    tweetText = buildTweetText(post.content, post.hashtags ?? [], null);
   } catch (e) {
     return {
       ok: false,
@@ -119,7 +123,16 @@ export async function publishPostToX(
     };
   } catch (e) {
     if (e instanceof XApiError) {
-      return { ok: false, errorMessage: e.message, status: e.status };
+      // Append the raw X detail so the dashboard surfaces the actual
+      // reason (e.g. "Your client app is not configured with the
+      // appropriate oauth1 app permissions for this endpoint" — the
+      // most common 403 cause for new X dev portal apps).
+      const detail = e.detail ? ` | X詳細: ${e.detail}` : "";
+      return {
+        ok: false,
+        errorMessage: `${e.message}${detail}`,
+        status: e.status,
+      };
     }
     return {
       ok: false,

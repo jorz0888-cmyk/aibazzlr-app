@@ -18,16 +18,21 @@ export class XApiError extends Error {
 }
 
 /**
- * Compose the final tweet text from content + hashtags. Validates the X 280-
- * character limit (counted as code units, matching X's display assumption for
- * Japanese text — reasonable approximation).
+ * Compose the final tweet text from content + hashtags. The optional
+ * `maxLen` argument lets callers supply the per-AI-config cap (Phase 14)
+ * instead of the hard-coded X-Free-tier 280. Pass `null` to skip the
+ * length check entirely (X server is then the final authority).
  */
-export function buildTweetText(content: string, hashtags: string[]): string {
+export function buildTweetText(
+  content: string,
+  hashtags: string[],
+  maxLen: number | null = 280,
+): string {
   const tags = (hashtags ?? []).filter(Boolean).join(" ");
   const text = tags ? `${content}\n\n${tags}` : content;
-  if (text.length > 280) {
+  if (maxLen !== null && text.length > maxLen) {
     throw new Error(
-      `投稿が280文字を超えています（${text.length}文字）。本文かハッシュタグを短くしてください。`,
+      `投稿が${maxLen}文字を超えています（${text.length}文字）。本文かハッシュタグを短くしてください。`,
     );
   }
   return text;
@@ -211,6 +216,16 @@ export function translateXError(
  */
 const X_MEDIA_UPLOAD_URL = "https://upload.twitter.com/1.1/media/upload.json";
 
+/**
+ * Print the first 8 chars of the bearer token to logs. Useful for
+ * distinguishing "I sent a real user-context OAuth2 token" vs "I sent the
+ * App-only bearer" without exposing the secret in full.
+ */
+function tokenFingerprint(token: string): string {
+  const trimmed = token.trim();
+  return `${trimmed.slice(0, 8)}…(len=${trimmed.length})`;
+}
+
 export async function uploadImageToX(
   accessToken: string,
   imageUrl: string,
@@ -254,7 +269,20 @@ export async function uploadImageToX(
   }
 
   if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
+    const rawText = await response.text().catch(() => "");
+    console.error("[x-api] uploadImageToX failed", {
+      status: response.status,
+      url: X_MEDIA_UPLOAD_URL,
+      tokenFingerprint: tokenFingerprint(accessToken),
+      contentType: response.headers.get("content-type"),
+      body: rawText.slice(0, 1000),
+    });
+    let body: XApiBody = {};
+    try {
+      body = JSON.parse(rawText) as XApiBody;
+    } catch {
+      /* leave as empty */
+    }
     const { message, rawDetail } = translateXError(response.status, body);
     throw new XApiError(`画像アップロード失敗: ${message}`, response.status, rawDetail);
   }
@@ -300,7 +328,21 @@ export async function postToX(
   }
 
   if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
+    const rawText = await response.text().catch(() => "");
+    console.error("[x-api] postToX failed", {
+      status: response.status,
+      url: X_TWEETS_URL,
+      tokenFingerprint: tokenFingerprint(accessToken),
+      contentType: response.headers.get("content-type"),
+      hasMedia: (mediaIds?.length ?? 0) > 0,
+      body: rawText.slice(0, 1000),
+    });
+    let body: XApiBody = {};
+    try {
+      body = JSON.parse(rawText) as XApiBody;
+    } catch {
+      /* leave as empty */
+    }
     const { message, rawDetail } = translateXError(response.status, body);
     throw new XApiError(message, response.status, rawDetail);
   }
