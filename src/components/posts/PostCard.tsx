@@ -266,6 +266,38 @@ export function PostCard({ post }: { post: PostListItem }) {
           </div>
         )}
 
+        {(() => {
+          // Phase 14: small character-count indicator. Mirrors
+          // buildTweetText so we read the same length the publisher sends.
+          const tags = (post.hashtags ?? []).filter(Boolean).join(" ");
+          const rendered = tags
+            ? `${post.content}\n\n${tags}`
+            : post.content;
+          const len = rendered.length;
+          const max = post.ai_config?.max_post_length ?? 280;
+          const over = len > max;
+          const warn = !over && len >= Math.floor(max * 0.9);
+          return (
+            <p
+              className={[
+                "font-mono text-[11px]",
+                over
+                  ? "text-danger"
+                  : warn
+                    ? "text-warning"
+                    : "text-ink-subtle",
+              ].join(" ")}
+            >
+              ✏ {len} / {max} 文字
+              {over && (
+                <span className="ml-2 font-sans">
+                  ⚠ 上限超過 — 投稿時に切り詰めの可能性
+                </span>
+              )}
+            </p>
+          );
+        })()}
+
         {post.strategic_intent && (
           <p className="flex items-start gap-1.5 rounded-md border border-line bg-white/5 p-2 text-[11px] leading-relaxed text-ink-muted">
             <span aria-hidden>💡</span>

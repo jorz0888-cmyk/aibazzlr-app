@@ -107,6 +107,8 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     "monthly_goal",
     "target_audience_preset",
     "target_audience_description",
+    // Phase 14 post length cap
+    "max_post_length",
   ];
   for (const key of passthrough) {
     if (key in body) {

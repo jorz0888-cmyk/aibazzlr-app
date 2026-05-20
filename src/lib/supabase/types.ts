@@ -218,6 +218,8 @@ export type AiConfig = {
   target_audience_preset: string | null;
   target_audience_description: string | null;
   recent_topics: RecentTopicEntry[];
+  // -- Phase 14: post length cap (X plan-dependent) --
+  max_post_length: number;
   // ----------------------------------------------
   created_at: string;
   updated_at: string;

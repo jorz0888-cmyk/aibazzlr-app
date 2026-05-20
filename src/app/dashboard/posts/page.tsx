@@ -35,7 +35,12 @@ export default async function PostsPage() {
       ? (() => {
           const c = aiMap.get(p.ai_config_id);
           return c
-            ? { id: c.id, name: c.name, account_mode: c.account_mode }
+            ? {
+                id: c.id,
+                name: c.name,
+                account_mode: c.account_mode,
+                max_post_length: c.max_post_length ?? 280,
+              }
             : null;
         })()
       : null,

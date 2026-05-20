@@ -33,7 +33,13 @@ const LANGUAGE_GUARD = `
 - 中国語繁体字 / 簡体字 の混入禁止
 - 英単語は固有名詞・ブランド名・URL のみ許可`;
 
-const OUTPUT_FORMAT = `
+function outputFormat(maxLen: number): string {
+  // Content budget = total cap minus a small reserve for hashtags + the
+  // "\n\n" + space separators that buildTweetText injects between them.
+  // The hard guarantee is total ≤ maxLen; this hint is just to steer the
+  // model so it doesn't bump up against the limit every time.
+  const contentBudget = Math.max(50, maxLen - 60);
+  return `
 
 【出力形式】
 以下のJSON形式で必ず返してください：
@@ -47,13 +53,34 @@ const OUTPUT_FORMAT = `
 }
 \`\`\`
 
+【文字数制約（厳守）】
+- 投稿本文 + ハッシュタグ + 区切り文字 の **合計を ${maxLen} 文字以内** に必ず収める
+- content は目安として ${contentBudget} 文字以内に
+- 全角・半角を問わずカウント、改行も1文字としてカウント
+- 上限を超えた出力は無効とみなされ再生成されます
+
 【制約】
-- contentは200文字以内（ハッシュタグ用に余裕を残す）
 - hashtagsは3-5個、なるべく自然な形で
 - 改行を効果的に使う
 - ハッシュタグは content には含めず、必ず hashtags 配列で返す
 - topic_tags は snake_case の英小文字で 1〜3 個（例: morning_routine, menu_intro, weekday_promo）
 - strategic_intent は 1 行、誰がどんなタイミングで読むことを想定したかが分かる短い日本語`;
+}
+
+/**
+ * Compute the rendered tweet length the way the publisher actually sends
+ * it (content + "\n\n" + space-separated hashtags). Mirrors
+ * buildTweetText in src/lib/posts/x-api.ts so the validator and the
+ * publisher agree on length.
+ */
+export function computeTweetLength(
+  content: string,
+  hashtags: string[],
+): number {
+  const tags = (hashtags ?? []).filter(Boolean).join(" ");
+  const rendered = tags ? `${content}\n\n${tags}` : content;
+  return rendered.length;
+}
 
 function buildStrategySection(
   aiConfig: AiConfig,
@@ -142,7 +169,8 @@ ${aiConfig.world_view ?? ""}
   // Phase 11.5: language guard. Always-on hint to keep the output JP-only.
   prompt += LANGUAGE_GUARD;
 
-  prompt += OUTPUT_FORMAT;
+  // Phase 14: include the per-config length cap in the output format.
+  prompt += outputFormat(aiConfig.max_post_length ?? 280);
   return prompt;
 }
 
@@ -281,19 +309,27 @@ export async function generatePostDraft(
   const attempts: string[] = [];
   const warnings: string[] = [];
 
-  // Phase 11.5: up to 2 attempts when the output contains foreign characters.
-  // The second attempt re-uses the cached system prompt but appends a fix-up
-  // hint to the user message describing what tripped the validator.
+  // Phase 11.5 + 14: up to 2 attempts. On each attempt we validate the raw
+  // text for forbidden characters (language) AND compute the rendered tweet
+  // length against the AI config's max_post_length cap. Either failure
+  // triggers a retry with combined feedback. If both checks pass we break.
   const MAX_ATTEMPTS = 2;
+  const maxLen = aiConfig.max_post_length ?? 280;
   let resp;
   let text = "";
   let lastDetected: DetectedRun[] = [];
+  let lastLengthOverrun: { actual: number; max: number } | null = null;
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const userMessage =
-      attempt === 0
-        ? baseUser
-        : baseUser + retryInstructionForDetection(lastDetected);
+    let userMessage = baseUser;
+    if (attempt > 0) {
+      if (lastDetected.length > 0) {
+        userMessage += retryInstructionForDetection(lastDetected);
+      }
+      if (lastLengthOverrun) {
+        userMessage += `\n\n【前回の出力エラー】\n前回の出力は合計 ${lastLengthOverrun.actual} 文字でした。上限 ${lastLengthOverrun.max} 文字を厳守してください（本文 + ハッシュタグ + 区切り文字を全て含む）。`;
+      }
+    }
 
     try {
       resp = await anthropic.messages.create({
@@ -323,23 +359,55 @@ export async function generatePostDraft(
       .map((c) => (c.type === "text" ? c.text : ""))
       .join("");
 
+    // Language check on raw text first — fast pre-parse signal.
     const validation = validateJapaneseOutput(text);
-    if (validation.valid) {
-      lastDetected = [];
-      break;
+    lastDetected = validation.valid ? [] : validation.detected;
+    if (!validation.valid) {
+      console.warn("[generator] language validation failed", {
+        attempt,
+        detected: lastDetected,
+      });
     }
-    lastDetected = validation.detected;
-    console.warn("[generator] language validation failed", {
-      attempt,
-      detected: lastDetected,
-    });
-    if (attempt + 1 === MAX_ATTEMPTS) {
-      attempts.push("language_check_failed");
-      warnings.push(
-        `言語チェックで ${MAX_ATTEMPTS} 回連続失敗（${lastDetected
-          .map((d) => d.kind)
-          .join(", ")}）。出力をそのまま採用しました。`,
+
+    // Length check on parsed content + hashtags (mirrors buildTweetText).
+    const previewParsed = extractJson(text);
+    let previewContent = "";
+    let previewHashtags: string[] = [];
+    if (previewParsed && typeof previewParsed.content === "string") {
+      previewContent = previewParsed.content.trim();
+      previewHashtags = toStringArray(previewParsed.hashtags).map((t) =>
+        t.startsWith("#") ? t : `#${t}`,
       );
+    } else {
+      previewContent = text.trim();
+    }
+    const tweetLen = computeTweetLength(previewContent, previewHashtags);
+    lastLengthOverrun =
+      tweetLen > maxLen ? { actual: tweetLen, max: maxLen } : null;
+    if (lastLengthOverrun) {
+      console.warn("[generator] length check failed", {
+        attempt,
+        ...lastLengthOverrun,
+      });
+    }
+
+    if (validation.valid && !lastLengthOverrun) break;
+
+    if (attempt + 1 === MAX_ATTEMPTS) {
+      if (lastDetected.length > 0) {
+        attempts.push("language_check_failed");
+        warnings.push(
+          `言語チェックで ${MAX_ATTEMPTS} 回連続失敗（${lastDetected
+            .map((d) => d.kind)
+            .join(", ")}）。出力をそのまま採用しました。`,
+        );
+      }
+      if (lastLengthOverrun) {
+        attempts.push("length_check_failed");
+        warnings.push(
+          `文字数チェックで ${MAX_ATTEMPTS} 回連続失敗（${lastLengthOverrun.actual}/${lastLengthOverrun.max} 文字）。投稿前に内容確認推奨。`,
+        );
+      }
     }
   }
 

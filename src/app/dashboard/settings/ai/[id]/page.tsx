@@ -13,6 +13,7 @@ import { ConfigDetailActions } from "./ConfigDetailActions";
 import { AutoPostSection } from "./AutoPostSection";
 import { MediaLibrarySection } from "./MediaLibrarySection";
 import { MarketingStrategySection } from "./MarketingStrategySection";
+import { MaxPostLengthEditor } from "./MaxPostLengthEditor";
 
 export const dynamic = "force-dynamic";
 
@@ -140,6 +141,10 @@ export default async function ConfigDetailPage({
           field="posting_frequency"
           initial={config.posting_frequency}
           label="投稿頻度"
+        />
+        <MaxPostLengthEditor
+          configId={config.id}
+          initial={config.max_post_length ?? 280}
         />
       </Card>
 
