@@ -1,6 +1,8 @@
 import {
   buildOauth1AuthHeader,
+  percentEncode,
   readEnvOauth1Consumer,
+  signOauth1,
 } from "./oauth1";
 
 const X_REQUEST_TOKEN_URL = "https://api.twitter.com/oauth/request_token";
@@ -51,7 +53,7 @@ export async function requestRequestToken(
   // oauth_callback is an OAuth 1.0a header param — goes into both the
   // signature base and the Authorization header. The signer's
   // `oauthExtras` channel handles that cleanly.
-  const authHeader = buildOauth1AuthHeader({
+  const signed = signOauth1({
     method: "POST",
     url: X_REQUEST_TOKEN_URL,
     oauthExtras: { oauth_callback: callbackUrl },
@@ -63,11 +65,33 @@ export async function requestRequestToken(
     },
   });
 
+  // Phase 15 diagnostic dump — every value that goes over the wire,
+  // alongside the percent-encoded form X actually sees in the signature
+  // base. This is the ground truth for debugging 415 "Callback URL
+  // not approved" errors: compare callbackEncoded with what the X Dev
+  // Portal has stored and the bug is either obvious or eliminated.
+  console.log("[oauth1/request_token] outgoing", {
+    url: X_REQUEST_TOKEN_URL,
+    method: "POST",
+    callbackRaw: callbackUrl,
+    callbackEncoded: percentEncode(callbackUrl),
+    consumerKeyPrefix: consumer.consumerKey.slice(0, 8) + "…",
+    consumerKeyLen: consumer.consumerKey.length,
+    signatureBase: signed.signatureBase,
+    paramString: signed.paramString,
+    oauthParams: signed.oauthParams,
+    authorizationHeader: signed.header,
+  });
+
   const res = await fetch(X_REQUEST_TOKEN_URL, {
     method: "POST",
-    headers: { Authorization: authHeader },
+    headers: { Authorization: signed.header },
   });
   const bodyText = await res.text();
+  console.log("[oauth1/request_token] response", {
+    status: res.status,
+    body: bodyText.slice(0, 1000),
+  });
   if (!res.ok) {
     console.error("[x-oauth1-flow] request_token failed", {
       status: res.status,

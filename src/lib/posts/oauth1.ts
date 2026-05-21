@@ -37,7 +37,18 @@ export function percentEncode(s: string): string {
     .replace(/\)/g, "%29");
 }
 
-export function buildOauth1AuthHeader({
+export type Oauth1SignResult = {
+  /** The fully-formed value to use in `Authorization:` header. */
+  header: string;
+  /** The HMAC-SHA1 signature base string (debug). */
+  signatureBase: string;
+  /** sorted `key=value&key=value` paramstring fed into base (debug). */
+  paramString: string;
+  /** All OAuth params (incl. signature) used in the header (debug). */
+  oauthParams: Record<string, string>;
+};
+
+export function signOauth1({
   method,
   url,
   formParams = {},
@@ -61,7 +72,7 @@ export function buildOauth1AuthHeader({
    */
   oauthExtras?: Record<string, string>;
   creds: Oauth1Credentials;
-}): string {
+}): Oauth1SignResult {
   const oauthParams: Record<string, string> = {
     oauth_consumer_key: creds.consumerKey,
     oauth_nonce: crypto.randomBytes(16).toString("hex"),
@@ -102,7 +113,19 @@ export function buildOauth1AuthHeader({
     .sort()
     .map((k) => `${percentEncode(k)}="${percentEncode(fullParams[k])}"`)
     .join(", ");
-  return `OAuth ${headerParts}`;
+  return {
+    header: `OAuth ${headerParts}`,
+    signatureBase: baseString,
+    paramString: sortedPairs,
+    oauthParams: fullParams,
+  };
+}
+
+/** Thin wrapper for call sites that don't need the signing intermediates. */
+export function buildOauth1AuthHeader(
+  opts: Parameters<typeof signOauth1>[0],
+): string {
+  return signOauth1(opts).header;
 }
 
 export function readEnvOauth1Consumer(): {
