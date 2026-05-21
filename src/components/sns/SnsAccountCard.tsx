@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Spinner } from "@/components/Spinner";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { useToast } from "@/components/common/Toast";
 import type { SocialAccount } from "@/lib/supabase/types";
 
 const PLATFORM_META: Record<
@@ -236,6 +237,10 @@ export function SnsAccountCard({ account }: { account: SocialAccount }) {
         <div className="basis-full text-xs text-danger">{error}</div>
       )}
 
+      {account.platform === "x" && (
+        <Oauth1ManualKeyPanel account={account} />
+      )}
+
       <ConfirmDialog
         open={disconnectOpen}
         title="連携を解除"
@@ -254,5 +259,180 @@ export function SnsAccountCard({ account }: { account: SocialAccount }) {
         onCancel={() => setDisconnectOpen(false)}
       />
     </li>
+  );
+}
+
+/**
+ * Admin-only escape hatch: paste OAuth 1.0a Access Token + Secret minted in
+ * the X Developer Portal so the publisher switches this account onto the
+ * OAuth 1.0a path (v1.1 media upload + v2 tweet posting). Mirrors n8n's
+ * known-good auth model. Required while the 3-legged 1.0a connect flow is
+ * blocked by X's 415 "Callback URL not approved" issue.
+ *
+ * Backed by POST /api/social-accounts/[id]/oauth1 (cb0f9cd).
+ */
+function Oauth1ManualKeyPanel({ account }: { account: SocialAccount }) {
+  const router = useRouter();
+  const toast = useToast();
+  const isSet = Boolean(account.oauth1_access_token);
+  const [token, setToken] = useState("");
+  const [secret, setSecret] = useState("");
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState<"save" | "clear" | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    if (!token.trim() || !secret.trim()) {
+      setErr("Access Token と Token Secret の両方を入力してください");
+      return;
+    }
+    setErr(null);
+    setBusy("save");
+    try {
+      const res = await fetch(`/api/social-accounts/${account.id}/oauth1`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          access_token: token.trim(),
+          access_token_secret: secret.trim(),
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      toast.success("OAuth 1.0a キーを保存しました", {
+        description: `@${account.username} は完全自動投稿が有効になりました`,
+      });
+      setToken("");
+      setSecret("");
+      router.refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "保存に失敗しました");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function clear() {
+    if (!confirm(`@${account.username} の OAuth 1.0a キーを削除しますか？`)) {
+      return;
+    }
+    setErr(null);
+    setBusy("clear");
+    try {
+      const res = await fetch(`/api/social-accounts/${account.id}/oauth1`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clear: true }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      toast.info("OAuth 1.0a キーを削除しました", {
+        description: `@${account.username} は OAuth 2.0 経路に戻ります`,
+      });
+      router.refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "削除に失敗しました");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <details className="basis-full">
+      <summary className="cursor-pointer rounded-md border border-line bg-white/5 p-2 text-[11px] text-ink-muted transition hover:border-cyan/30 hover:text-ink">
+        <span className="font-mono tracking-wider">OAuth 1.0a キー</span>
+        <span
+          className={[
+            "ml-2 rounded-full px-2 py-0.5 font-mono text-[9px] tracking-widest",
+            isSet
+              ? "bg-cyan/15 text-cyan"
+              : "border border-line-strong bg-white/5 text-ink-subtle",
+          ].join(" ")}
+        >
+          {isSet ? "設定済み — 完全自動 ON" : "未設定 — OAuth 2.0 経路"}
+        </span>
+        <span className="ml-2 text-[10px] text-ink-subtle">
+          （管理者向け · 画像付き完全自動投稿）
+        </span>
+      </summary>
+
+      <div className="mt-3 space-y-3 rounded-md border border-line bg-bg/40 p-3">
+        <p className="text-[11px] leading-relaxed text-ink-subtle">
+          X Developer Portal →「Keys and tokens」→「Access Token and Secret」で
+          発行した <b className="text-ink">Access Token</b> と{" "}
+          <b className="text-ink">Token Secret</b> をここに貼り付けます。
+          保存すると、このアカウントの投稿が v1.1 画像アップロード + v2 ツイート
+          (どちらも OAuth 1.0a) に切り替わり、画像付きの完全自動投稿が成功します。
+          Consumer Key / Secret は環境変数（X_CONSUMER_KEY /
+          X_CONSUMER_SECRET）を使用するため入力不要です。
+        </p>
+
+        <div>
+          <label className="label !mb-1 block text-[11px]">Access Token</label>
+          <input
+            type={show ? "text" : "password"}
+            className="input font-mono text-xs"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            placeholder={isSet ? "（保存済 — 上書きするには再入力）" : ""}
+            disabled={busy !== null}
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </div>
+        <div>
+          <label className="label !mb-1 block text-[11px]">
+            Access Token Secret
+          </label>
+          <input
+            type={show ? "text" : "password"}
+            className="input font-mono text-xs"
+            value={secret}
+            onChange={(e) => setSecret(e.target.value)}
+            placeholder={isSet ? "（保存済 — 上書きするには再入力）" : ""}
+            disabled={busy !== null}
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className="btn-primary text-xs"
+            onClick={save}
+            disabled={busy !== null || (!token && !secret)}
+          >
+            {busy === "save" ? (
+              <Spinner size={12} />
+            ) : isSet ? (
+              "保存して上書き"
+            ) : (
+              "保存して完全自動を有効化"
+            )}
+          </button>
+          {isSet && (
+            <button
+              type="button"
+              className="btn-secondary text-xs text-danger"
+              onClick={clear}
+              disabled={busy !== null}
+            >
+              {busy === "clear" ? <Spinner size={12} /> : "クリア"}
+            </button>
+          )}
+          <label className="ml-auto flex items-center gap-1 text-[10px] text-ink-subtle">
+            <input
+              type="checkbox"
+              checked={show}
+              onChange={(e) => setShow(e.target.checked)}
+            />
+            表示
+          </label>
+        </div>
+
+        {err && <p className="text-xs text-danger">{err}</p>}
+      </div>
+    </details>
   );
 }
