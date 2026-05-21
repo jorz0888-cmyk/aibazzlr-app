@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Spinner } from "@/components/Spinner";
+import { useToast } from "@/components/common/Toast";
 import type { MediaLibraryRow } from "@/lib/supabase/types";
 
 import { friendlyErrorMessage } from "@/lib/errors/client";
@@ -18,6 +19,7 @@ export function MediaLibrarySection({
 }: {
   aiConfigId: string;
 }) {
+  const toast = useToast();
   const [items, setItems] = useState<MediaLibraryRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -61,14 +63,22 @@ export function MediaLibrarySection({
   }
 
   async function removeOne(id: string) {
-    if (!confirm("この写真を削除しますか？投稿に紐づいているものは影響を受けません。"))
+    if (
+      !confirm(
+        "この写真を削除しますか？投稿済みの投稿には影響しません（未投稿のドラフトに紐づいていた場合は画像なしで投稿されます）。",
+      )
+    )
       return;
     setErr(null);
     setItems((prev) => prev?.filter((x) => x.id !== id) ?? null);
     try {
       await jsonFetch(`/api/media/${id}`, { method: "DELETE" });
+      toast.success("写真を削除しました");
     } catch (e) {
       setErr(e instanceof Error ? e.message : "削除失敗");
+      toast.error("写真の削除に失敗しました", {
+        description: e instanceof Error ? e.message : undefined,
+      });
       void reload();
     }
   }
@@ -166,11 +176,14 @@ export function MediaLibrarySection({
       ) : (
         <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
           {items.map((it) => (
-            <li key={it.id}>
+            <li
+              key={it.id}
+              className="group relative overflow-hidden rounded-lg border border-line bg-bg/40 transition hover:border-cyan/40"
+            >
               <button
                 type="button"
                 onClick={() => setDetail(it)}
-                className="group block w-full overflow-hidden rounded-lg border border-line bg-bg/40 text-left transition hover:border-cyan/40"
+                className="block w-full text-left"
               >
                 <div className="relative aspect-square w-full">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -199,6 +212,32 @@ export function MediaLibrarySection({
                         </>
                       )}
                 </p>
+              </button>
+              {/* Phase: per-thumbnail × delete. Always visible on touch
+                  devices; fades in on hover for desktop where space is
+                  cheaper. Sits outside the open-detail button so taps
+                  don't double-trigger. */}
+              <button
+                type="button"
+                aria-label="この写真を削除"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void removeOne(it.id);
+                }}
+                className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-full border border-line-strong bg-black/70 text-ink shadow-md opacity-100 transition hover:border-danger hover:text-danger md:opacity-0 md:group-hover:opacity-100"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  aria-hidden
+                >
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                </svg>
               </button>
             </li>
           ))}

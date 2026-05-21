@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { deleteFromUserMedia } from "@/lib/media/storage";
+import type { PostStatus } from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
 
@@ -64,6 +65,38 @@ export async function DELETE(_request: NextRequest, { params }: Ctx) {
     .single();
   if (!row || row.user_id !== user.id) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // Cascade-null image_url on pending drafts that referenced this media.
+  // posts.media_id has ON DELETE SET NULL, but image_url is a separate
+  // snapshot column populated at generation time so historical posted/
+  // published rows can still render their old thumbnails after the
+  // storage object is gone. We only null it for not-yet-published drafts
+  // so they fail-soft to a text-only post (matches Phase 12 fail-soft).
+  // Everything that isn't already published or actively in flight.
+  // posted/published/posted_manually keep their snapshot URL so the
+  // historical timeline can still render the thumbnail. publishing is
+  // mid-flight — yanking the image now would risk a half-posted state.
+  const PENDING_STATUSES: PostStatus[] = [
+    "pending",
+    "draft",
+    "pending_approval",
+    "approved",
+    "rejected",
+    "awaiting_manual_post",
+    "queued",
+    "scheduled",
+    "failed",
+    "cancelled",
+  ];
+  const { error: unlinkErr } = await supabase
+    .from("posts")
+    .update({ image_url: null })
+    .eq("media_id", id)
+    .eq("user_id", user.id)
+    .in("status", PENDING_STATUSES);
+  if (unlinkErr) {
+    console.error("[media/:id][DELETE] unlink pending posts failed", unlinkErr);
   }
 
   await deleteFromUserMedia(supabase, row.storage_path);
