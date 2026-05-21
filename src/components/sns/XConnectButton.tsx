@@ -4,21 +4,46 @@ import { useState } from "react";
 import { Spinner } from "@/components/Spinner";
 
 /**
- * Phase 15: new connections go through the 3-legged OAuth 1.0a flow at
- * /api/auth/x/oauth1/start (302 → X authorize page). The old OAuth 2.0
- * route at /api/auth/x/login is intentionally left in place so accounts
- * connected before this change keep working through the publisher's
- * resolveXAuth() fallback.
+ * Reverted from the OAuth 1.0a 3-legged start (phase-15) back to the
+ * OAuth 2.0 flow at /api/auth/x/login so beta users can actually
+ * connect again — X kept returning "Callback URL not approved (415)"
+ * on the OAuth 1.0a request_token step despite the callback being
+ * registered byte-for-byte (see verbose logs from c8c4663).
+ *
+ * The OAuth 1.0a infrastructure (start/callback routes, oauth1_pending
+ * table, signer, publisher resolveXAuth fallback) is intentionally
+ * preserved — once the Dev Portal side is resolved we just flip this
+ * one href back.
  */
 export function XConnectButton() {
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  function handleConnect() {
+  async function handleConnect() {
+    setError(null);
     setLoading(true);
-    // Top-level navigation — /api/auth/x/oauth1/start responds with a 302
-    // to X's authorize URL, so a fetch would not follow the redirect into
-    // a different origin.
-    window.location.href = "/api/auth/x/oauth1/start";
+    try {
+      const res = await fetch("/api/auth/x/login", { method: "POST" });
+      const data = (await res.json().catch(() => ({}))) as {
+        redirect_url?: string;
+        error?: string;
+        debug?: { message?: string };
+      };
+
+      if (res.ok && data.redirect_url) {
+        window.location.href = data.redirect_url;
+        return;
+      }
+
+      const msg =
+        data.error ??
+        data.debug?.message ??
+        `連携の開始に失敗しました (HTTP ${res.status})`;
+      throw new Error(msg);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "エラーが発生しました");
+      setLoading(false);
+    }
   }
 
   return (
@@ -44,6 +69,7 @@ export function XConnectButton() {
         )}
         {loading ? "接続中..." : "X (Twitter) を連携"}
       </button>
+      {error && <div className="text-xs text-danger">{error}</div>}
     </div>
   );
 }
