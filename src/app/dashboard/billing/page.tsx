@@ -6,7 +6,11 @@ import {
   PLAN_PRICES,
   type Plan,
 } from "@/lib/plans";
-import { checkMonthlyPostQuota, checkAiConfigQuota } from "@/lib/quota";
+import {
+  checkMonthlyPostQuota,
+  checkAiConfigQuota,
+  checkMonthlyImageQuota,
+} from "@/lib/quota";
 import {
   BillingActions,
   DowngradeToFreeButton,
@@ -46,9 +50,10 @@ export default async function BillingPage({
   const periodEnd = profile?.current_period_end ?? null;
   const cancelAtPeriodEnd = profile?.cancel_at_period_end ?? false;
 
-  const [postQuota, configQuota] = await Promise.all([
+  const [postQuota, configQuota, imageQuota] = await Promise.all([
     checkMonthlyPostQuota(user.id),
     checkAiConfigQuota(user.id),
+    checkMonthlyImageQuota(user.id),
   ]);
 
   return (
@@ -85,7 +90,7 @@ export default async function BillingPage({
 
       <section className="card p-6">
         <h2 className="text-base font-bold text-ink">現在の状況</h2>
-        <dl className="mt-4 grid gap-4 sm:grid-cols-3">
+        <dl className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div>
             <dt className="font-mono text-[10px] tracking-[0.2em] text-ink-muted">
               CURRENT PLAN
@@ -105,6 +110,24 @@ export default async function BillingPage({
               {postQuota.used} <span className="text-sm text-ink-subtle">/ {postQuota.limit}</span>
             </dd>
             <Bar value={postQuota.used} max={postQuota.limit} />
+          </div>
+          <div>
+            <dt className="font-mono text-[10px] tracking-[0.2em] text-ink-muted">
+              AI IMAGES THIS PERIOD
+            </dt>
+            <dd className="mt-1 text-xl font-extrabold text-ink">
+              {imageQuota.used}{" "}
+              <span className="text-sm text-ink-subtle">
+                / {imageQuota.limit > 0 ? imageQuota.limit : "—"}
+              </span>
+            </dd>
+            {imageQuota.limit > 0 ? (
+              <Bar value={imageQuota.used} max={imageQuota.limit} />
+            ) : (
+              <p className="mt-1 text-[11px] text-ink-subtle">
+                ※ AI画像生成は Standard 以上で利用可能
+              </p>
+            )}
           </div>
           <div>
             <dt className="font-mono text-[10px] tracking-[0.2em] text-ink-muted">

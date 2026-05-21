@@ -100,16 +100,22 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 2a. Phase 12: ask Claude to pick a matching image from the user's
-  //     media library (if any). Fail-soft — empty library or unfit
-  //     candidates just means we create the draft without an image.
+  // 2a. Phase 12 / Diagnosis 2026-05-21: library lookup with Gemini
+  //     fallback when library is empty + plan is paid + image quota
+  //     remains + GEMINI_API_KEY is set. Fail-soft to text-only.
   const picked = await autoAttachLibraryImage(
     supabase,
     user.id,
     aiConfig.id,
     generated.content,
     generated.hashtags,
+    generated.topic_tags,
   );
+  console.log("[POSTS-GENERATE] image attach result", {
+    user_id: user.id,
+    source: picked.source,
+    media_id: picked.media_id,
+  });
 
   // 2b. Persist as draft. applyPostDefaults fills in NOT-NULL columns
   //     (status, scheduled_at, hashtags, platform, engagement_data,

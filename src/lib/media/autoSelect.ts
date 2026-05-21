@@ -1,25 +1,35 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, MediaLibraryRow } from "@/lib/supabase/types";
 import { selectFromLibrary } from "./selector";
+import {
+  buildImagePromptFromPost,
+  generateAiImageForUser,
+  GeminiGenerationError,
+} from "./aiGenerate";
+import { getPlanLimits, isPaidPlan, type Plan } from "@/lib/plans";
 
 type Client = SupabaseClient<Database>;
+
+export type AutoAttachSource = "library" | "ai_generated" | "none";
 
 export type AutoAttachResult = {
   media_id: string | null;
   image_url: string | null;
-  source: "library" | "none";
+  source: AutoAttachSource;
 };
 
 /**
- * Look up the user's media library for the given AI config (or any user
- * library when none is provided), ask Claude to pick the best fit for the
- * post content, and return the chosen public URL + media id. Returns
- * `{ null, null, "none" }` if the library is empty or no match was found —
- * the post is then created without an image, which is a valid state.
+ * Resolve a post image for both manual and cron-triggered draft
+ * generation. Tries, in order:
+ *   1. Library lookup (Claude picks the best fit if any candidates).
+ *   2. Gemini fallback — only for paid plans, only if quota remains,
+ *      only if GEMINI_API_KEY is configured. Increments the period's
+ *      AI image counter on success.
+ *   3. Returns "none" — caller posts text-only (fail-soft).
  *
- * Free-tier users still benefit: this only looks at uploaded photos; the
- * AI-generation fallback is the separate /api/media/generate endpoint and
- * is intentionally not invoked here (cost + plan gating).
+ * Caller-supplied logging context (post id is not yet known here, so
+ * we log via user_id + ai_config_id). All branches log so cron output
+ * shows exactly which path was taken.
  */
 export async function autoAttachLibraryImage(
   client: Client,
@@ -27,7 +37,9 @@ export async function autoAttachLibraryImage(
   aiConfigId: string | null,
   postContent: string,
   hashtags: string[],
+  topicTags: string[] = [],
 ): Promise<AutoAttachResult> {
+  // ----- 1. Library lookup ------------------------------------------------
   let query = client
     .from("media_library")
     .select("*")
@@ -41,18 +53,157 @@ export async function autoAttachLibraryImage(
     console.error("[media/autoSelect] library lookup failed", error);
     return { media_id: null, image_url: null, source: "none" };
   }
+
   const candidates = (data ?? []) as MediaLibraryRow[];
-  if (candidates.length === 0) {
-    return { media_id: null, image_url: null, source: "none" };
+  console.log("[media/autoSelect] library candidates", {
+    user_id: userId,
+    ai_config_id: aiConfigId,
+    count: candidates.length,
+  });
+
+  if (candidates.length > 0) {
+    const picked = await selectFromLibrary(postContent, hashtags, candidates);
+    if (picked) {
+      console.log("[media/autoSelect] selected from library", {
+        media_id: picked.id,
+        tags: picked.tags,
+      });
+      return {
+        media_id: picked.id,
+        image_url: picked.public_url,
+        source: "library",
+      };
+    }
+    console.log(
+      "[media/autoSelect] library had candidates but selector picked none — falling through to AI fallback",
+    );
   }
 
-  const picked = await selectFromLibrary(postContent, hashtags, candidates);
-  if (!picked) {
-    return { media_id: null, image_url: null, source: "none" };
+  // ----- 2. Gemini fallback ----------------------------------------------
+  const fallback = await tryAiFallback(
+    client,
+    userId,
+    aiConfigId,
+    postContent,
+    topicTags,
+    hashtags,
+  );
+  if (fallback) return fallback;
+
+  // ----- 3. Text-only fail-soft ------------------------------------------
+  console.log("[media/autoSelect] no image attached (fail-soft text-only)");
+  return { media_id: null, image_url: null, source: "none" };
+}
+
+async function tryAiFallback(
+  client: Client,
+  userId: string,
+  aiConfigId: string | null,
+  postContent: string,
+  topicTags: string[],
+  hashtags: string[],
+): Promise<AutoAttachResult | null> {
+  // a. Plan gate.
+  const { data: profile } = await client
+    .from("profiles")
+    .select(
+      "plan, ai_images_used_this_period, ai_images_period_start, current_period_start",
+    )
+    .eq("id", userId)
+    .single();
+
+  const plan = (profile?.plan ?? "free") as Plan;
+  if (!isPaidPlan(plan)) {
+    console.log(
+      "[media/autoSelect] Gemini fallback skipped — plan is free (image generation is a paid feature)",
+      { user_id: userId, plan },
+    );
+    return null;
   }
+
+  // b. API key gate.
+  if (!process.env.GEMINI_API_KEY) {
+    console.warn(
+      "[media/autoSelect] Gemini fallback skipped — GEMINI_API_KEY not configured",
+    );
+    return null;
+  }
+
+  // c. Quota gate. We do an inline read+reset of the counter rather than
+  //    calling checkMonthlyImageQuota() because that helper uses the
+  //    server (RLS) client and we want to behave the same whether called
+  //    from a cron admin client or a user-scoped server client.
+  const limit = getPlanLimits(plan).ai_images_per_month;
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  // Paid plans align to the Stripe billing cycle when known.
+  const wantStartIso =
+    profile?.current_period_start ?? monthStart.toISOString();
+  const recordedStart = profile?.ai_images_period_start ?? null;
+
+  let used = profile?.ai_images_used_this_period ?? 0;
+  if (!recordedStart || new Date(recordedStart) < new Date(wantStartIso)) {
+    // Period rollover — reset.
+    await client
+      .from("profiles")
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .update({
+        ai_images_used_this_period: 0,
+        ai_images_period_start: wantStartIso,
+      } as any)
+      .eq("id", userId);
+    used = 0;
+  }
+
+  if (used >= limit) {
+    console.log(
+      "[media/autoSelect] Gemini fallback skipped — image quota exhausted",
+      { user_id: userId, plan, used, limit },
+    );
+    return null;
+  }
+
+  console.log("[media/autoSelect] Gemini fallback ENGAGED", {
+    user_id: userId,
+    ai_config_id: aiConfigId,
+    plan,
+    used,
+    limit,
+  });
+
+  // d. Generate.
+  const prompt = buildImagePromptFromPost(postContent, topicTags, hashtags);
+  let media: MediaLibraryRow;
+  try {
+    media = await generateAiImageForUser(client, userId, aiConfigId, prompt);
+  } catch (e) {
+    if (e instanceof GeminiGenerationError) {
+      console.error("[media/autoSelect] Gemini fallback FAILED", {
+        status: e.status,
+        message: e.message,
+      });
+    } else {
+      console.error("[media/autoSelect] Gemini fallback FAILED (unknown)", e);
+    }
+    return null;
+  }
+
+  // e. Increment usage counter.
+  await client
+    .from("profiles")
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .update({ ai_images_used_this_period: used + 1 } as any)
+    .eq("id", userId);
+
+  console.log("[media/autoSelect] Gemini fallback SUCCESS", {
+    media_id: media.id,
+    new_used: used + 1,
+    limit,
+  });
+
   return {
-    media_id: picked.id,
-    image_url: picked.public_url,
-    source: "library",
+    media_id: media.id,
+    image_url: media.public_url,
+    source: "ai_generated",
   };
 }

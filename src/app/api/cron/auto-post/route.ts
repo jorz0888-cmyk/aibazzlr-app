@@ -283,14 +283,23 @@ async function processSchedule(
         ? "awaiting_manual_post"
         : "pending_approval";
 
-  // Phase 12: auto-attach a library image if the user has one.
+  // Phase 12 / Diagnosis 2026-05-21: auto-attach an image. Order is:
+  //   1) match from user's library  →  2) Gemini fallback (paid plans
+  //   only, quota-gated, GEMINI_API_KEY-gated)  →  3) text-only.
+  // All branches log verbosely so the cron run shows the chosen path.
   const picked = await autoAttachLibraryImage(
     admin,
     schedule.user_id,
     config.id,
     generated.content,
     generated.hashtags,
+    generated.topic_tags,
   );
+  console.log("[cron/auto-post] image attach result", {
+    schedule_id: schedule.id,
+    source: picked.source,
+    media_id: picked.media_id,
+  });
 
   const payload = applyPostDefaults({
     user_id: schedule.user_id,
