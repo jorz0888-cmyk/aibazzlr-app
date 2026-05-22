@@ -1,4 +1,5 @@
 import { buildOauth1AuthHeader, type Oauth1Credentials } from "./oauth1";
+import { X_SCOPES } from "@/lib/oauth/x-client";
 
 const X_TWEETS_URL = "https://api.x.com/2/tweets";
 
@@ -6,9 +7,14 @@ const X_TWEETS_URL = "https://api.x.com/2/tweets";
  * Phase 15 auth bundle. Callers pass either an OAuth 2.0 bearer (legacy)
  * or an OAuth 1.0a credentials set (preferred — matches n8n's known-good
  * config). publisher.ts picks based on what's saved on the account.
+ *
+ * `scopes` on the oauth2 variant is the list X actually granted at the
+ * time of the connection (read from social_accounts.scopes). Logged on
+ * failure to spot scope-shortage 403s (e.g. v2 media upload now wants
+ * `media.write` which we don't request yet).
  */
 export type XAuth =
-  | { kind: "oauth2"; accessToken: string }
+  | { kind: "oauth2"; accessToken: string; scopes?: string[] | null }
   | { kind: "oauth1"; creds: Oauth1Credentials };
 
 function buildAuthHeader(
@@ -280,6 +286,39 @@ export async function uploadImageToX(
   const uploadUrl =
     auth.kind === "oauth1" ? X_MEDIA_UPLOAD_V1_URL : X_MEDIA_UPLOAD_V2_URL;
 
+  // Diagnosis 2026-05-22: dump every aspect of the outgoing v2 upload
+  // request so we can pin down the 403. Specifically we want to see:
+  //  - which scopes the stored token actually has (vs what we requested),
+  //  - that we're sending multipart (not base64 JSON) with media_category,
+  //  - the bearer fingerprint so we know it's the right token.
+  // Authorization header value is NEVER logged in full — only scheme + len.
+  if (auth.kind === "oauth2") {
+    console.log("[x-api] uploadImageToX → outgoing (oauth2 / v2)", {
+      url: uploadUrl,
+      method: "POST",
+      bodyFormat: "multipart/form-data",
+      mediaField: "media (Blob)",
+      mediaCategory: "tweet_image",
+      mediaMime: mime,
+      mediaBytes: bytes.length,
+      authScheme: "Bearer",
+      bearerLen: auth.accessToken.length,
+      bearerPrefix: auth.accessToken.slice(0, 8) + "…",
+      requestedScopesAtConnect: [...X_SCOPES],
+      tokenScopesOnFile: auth.scopes ?? "(not stored)",
+      // Quick boolean so the line is grep-able in Vercel logs.
+      hasMediaWriteScope: (auth.scopes ?? []).includes("media.write"),
+    });
+  } else {
+    console.log("[x-api] uploadImageToX → outgoing (oauth1 / v1.1)", {
+      url: uploadUrl,
+      method: "POST",
+      bodyFormat: "multipart/form-data",
+      mediaBytes: bytes.length,
+      auth: authFingerprint(auth),
+    });
+  }
+
   let response: Response;
   try {
     response = await fetch(uploadUrl, {
@@ -300,12 +339,47 @@ export async function uploadImageToX(
 
   if (!response.ok) {
     const rawText = await response.text().catch(() => "");
-    console.error("[x-api] uploadImageToX failed", {
+    // Dump EVERYTHING X returned. The body is the ground truth for
+    // diagnosing 403:
+    //   - "Unsupported authentication" or scope error → missing media.write
+    //   - "client app is not configured with appropriate oauth1 app
+    //      permissions" → endpoint/auth-kind mismatch (we send oauth2
+    //      to a v1-only endpoint, or vice versa)
+    //   - "Forbidden" with no detail → app product/tier issue at X-side
+    // No truncation here — these errors are short anyway, and we need
+    // the full string to grep for "scope", "media.write", etc.
+    const respHeaders: Record<string, string> = {};
+    response.headers.forEach((v, k) => {
+      // Skip set-cookie etc — only the diagnostic headers.
+      if (
+        k === "content-type" ||
+        k === "x-rate-limit-limit" ||
+        k === "x-rate-limit-remaining" ||
+        k === "x-rate-limit-reset" ||
+        k === "x-response-time" ||
+        k === "x-tfe-preauth-account-id"
+      ) {
+        respHeaders[k] = v;
+      }
+    });
+    console.error("[x-api] uploadImageToX FAILED — full response dump", {
       status: response.status,
+      statusText: response.statusText,
       url: uploadUrl,
-      auth: authFingerprint(auth),
-      contentType: response.headers.get("content-type"),
-      body: rawText.slice(0, 1000),
+      authKind: auth.kind,
+      authFingerprint: authFingerprint(auth),
+      tokenScopesOnFile:
+        auth.kind === "oauth2" ? (auth.scopes ?? "(not stored)") : "(n/a)",
+      requestedScopesAtConnect:
+        auth.kind === "oauth2" ? [...X_SCOPES] : "(n/a)",
+      hasMediaWriteScope:
+        auth.kind === "oauth2"
+          ? (auth.scopes ?? []).includes("media.write")
+          : "(n/a)",
+      mediaBytes: bytes.length,
+      mediaMime: mime,
+      responseHeaders: respHeaders,
+      responseBodyFull: rawText,
     });
     let body: XApiBody = {};
     try {

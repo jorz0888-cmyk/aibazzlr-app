@@ -58,7 +58,10 @@ async function resolveXAuth(
     };
   }
   const accessToken = await getValidAccessToken(supabase, account.id, userId);
-  return { kind: "oauth2", accessToken };
+  // Diagnosis 2026-05-22: also pass the stored scopes so x-api.ts can log
+  // them next to the 403 dump. Lets us spot "missing media.write" without
+  // a separate DB read at the call site.
+  return { kind: "oauth2", accessToken, scopes: account.scopes };
 }
 
 export type PublishResult =
