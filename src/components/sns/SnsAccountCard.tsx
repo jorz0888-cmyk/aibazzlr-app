@@ -63,6 +63,19 @@ export function SnsAccountCard({ account }: { account: SocialAccount }) {
       ? "disconnected"
       : account.status;
 
+  // 2026-05-22: detect tokens minted before media.write was added to
+  // X_SCOPES. Without media.write the v2 /2/media/upload returns 403, so
+  // image-bearing auto-posts silently degrade to text-only. OAuth 1.0a
+  // accounts route through v1.1 upload and don't need this scope at all,
+  // so we suppress the banner there.
+  const isOnOauth1 = Boolean(account.oauth1_access_token);
+  const needsMediaWriteReconnect =
+    account.platform === "x" &&
+    !isOnOauth1 &&
+    status === "active" &&
+    Array.isArray(account.scopes) &&
+    !account.scopes.includes("media.write");
+
   async function disconnect() {
     if (loading) return;
     setError(null);
@@ -235,6 +248,36 @@ export function SnsAccountCard({ account }: { account: SocialAccount }) {
 
       {error && (
         <div className="basis-full text-xs text-danger">{error}</div>
+      )}
+
+      {needsMediaWriteReconnect && (
+        <div className="basis-full rounded-lg border border-warning/40 bg-warning/10 p-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-warning">
+                機能アップデート：画像付き自動投稿を有効化するには再連携が必要です
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed text-ink-muted">
+                X 側仕様変更により、画像アップロードに新しい権限
+                （<span className="font-mono">media.write</span>）が必要に
+                なりました。現在の連携はこの権限を持っていないため、画像
+                付き投稿が自動的にテキストのみへフォールバックします。
+                <br />
+                <span className="text-ink-subtle">
+                  ※ 再連携は1回だけです。テキストのみ自動投稿は引き続き動作します。
+                </span>
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={reconnect}
+              disabled={loading !== null}
+              className="btn-primary shrink-0 text-xs"
+            >
+              {loading === "reauth" ? <Spinner size={12} /> : "再連携する"}
+            </button>
+          </div>
+        </div>
       )}
 
       {account.platform === "x" && (

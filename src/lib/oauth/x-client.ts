@@ -1,14 +1,23 @@
 import crypto from "crypto";
 
-const X_AUTH_URL = "https://twitter.com/i/oauth2/authorize";
+// 2026-05-22: X moved the OAuth 2.0 authorize page from twitter.com to
+// x.com. The api.twitter.com token/revoke/user endpoints still resolve
+// (X kept them as aliases) so we leave those alone to avoid breaking
+// any cached behavior.
+const X_AUTH_URL = "https://x.com/i/oauth2/authorize";
 const X_TOKEN_URL = "https://api.twitter.com/2/oauth2/token";
 const X_REVOKE_URL = "https://api.twitter.com/2/oauth2/revoke";
 const X_USER_URL = "https://api.twitter.com/2/users/me";
 
+// 2026-05-22: media.write added after the v2 /2/media/upload 403
+// diagnosis pinned the missing scope as the root cause. Existing
+// OAuth 2.0 tokens were minted without it — those users need to
+// disconnect+reconnect once for the new scope to land.
 export const X_SCOPES = [
   "tweet.read",
   "tweet.write",
   "users.read",
+  "media.write",
   "offline.access", // required for refresh_token
 ] as const;
 
