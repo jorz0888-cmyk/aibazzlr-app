@@ -290,7 +290,10 @@ async function processSchedule(
     generated.content,
     generated.hashtags,
     generated.topic_tags,
-    { imageGenerationEnabled: config.image_generation_enabled },
+    {
+      imageGenerationEnabled: config.image_generation_enabled,
+      pillar: genCtx.pillar,
+    },
   );
   console.log("[cron/auto-post] image attach result", {
     schedule_id: schedule.id,

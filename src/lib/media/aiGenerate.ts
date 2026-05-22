@@ -1,6 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
-import type { Database, MediaLibraryRow } from "@/lib/supabase/types";
+import type {
+  ContentPillar,
+  Database,
+  MediaLibraryRow,
+} from "@/lib/supabase/types";
 import {
   buildStoragePath,
   extForMime,
@@ -29,6 +33,14 @@ export function buildImagePromptFromPost(
   content: string,
   topicTags: string[],
   hashtags: string[],
+  options: {
+    /** Phase 17: the pillar the post was generated for. */
+    pillar?: ContentPillar | null;
+    /** Phase 17: ai_description / prompt of the last N images this
+     *  config attached. Passed to Gemini as "explicitly do not look
+     *  like these" so visually identical loops break. */
+    recentImageDescriptions?: string[];
+  } = {},
 ): string {
   const topics = [...topicTags, ...hashtags]
     .map((t) => t.replace(/^#+/, "").trim())
@@ -39,12 +51,40 @@ export function buildImagePromptFromPost(
       ? `Subject / scene: ${topics.join(", ")}.`
       : "Subject / scene: a warm everyday moment hinted at by the caption.";
   const snippet = content.slice(0, 140).replace(/\s+/g, " ");
-  return [
+  const parts: string[] = [
     "Photorealistic 4:5 lifestyle photo suitable for a Japanese small-business social post.",
     topicLine,
+  ];
+  // Phase 17: pillar adds an angle hint Gemini can interpret as
+  // composition / framing direction. Kept short so it doesn't dwarf
+  // the content-derived signal.
+  if (options.pillar) {
+    parts.push(
+      `Angle: ${options.pillar.name} — ${options.pillar.description}.`,
+    );
+  }
+  parts.push(
     `Mood / caption context (do NOT render any text or watermark in the image): "${snippet}".`,
+  );
+  // Phase 17: anti-similarity hint. Surface the most-recent images'
+  // descriptions and tell Gemini to differ. Trimmed so the prompt
+  // stays under model attention limits.
+  const recent = (options.recentImageDescriptions ?? [])
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 5);
+  if (recent.length > 0) {
+    const list = recent
+      .map((d, i) => `(${i + 1}) ${d.slice(0, 120)}`)
+      .join(" | ");
+    parts.push(
+      `Recent images for this account were: ${list}. The new image must be visually distinct — different subject, composition, color palette, or framing.`,
+    );
+  }
+  parts.push(
     "Natural lighting, warm color palette, shallow depth of field, no on-image text, no logos.",
-  ].join(" ");
+  );
+  return parts.join(" ");
 }
 
 type GeminiInlineImage = {

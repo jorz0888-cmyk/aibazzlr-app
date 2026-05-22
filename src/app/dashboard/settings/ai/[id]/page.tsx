@@ -14,6 +14,7 @@ import { AutoPostSection } from "./AutoPostSection";
 import { MediaLibrarySection } from "./MediaLibrarySection";
 import { MarketingStrategySection } from "./MarketingStrategySection";
 import { MaxPostLengthEditor } from "./MaxPostLengthEditor";
+import { ContentPillarsSection } from "./ContentPillarsSection";
 
 export const dynamic = "force-dynamic";
 
@@ -218,6 +219,11 @@ export default async function ConfigDetailPage({
         initialGoal={config.monthly_goal}
         initialAudiencePreset={config.target_audience_preset}
         initialAudienceDescription={config.target_audience_description}
+      />
+
+      <ContentPillarsSection
+        aiConfigId={config.id}
+        initialPillars={config.content_pillars ?? []}
       />
 
       <Card title="世界観">

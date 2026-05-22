@@ -1,5 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database, MediaLibraryRow } from "@/lib/supabase/types";
+import type {
+  ContentPillar,
+  Database,
+  MediaLibraryRow,
+} from "@/lib/supabase/types";
 import { selectFromLibrary } from "./selector";
 import {
   buildImagePromptFromPost,
@@ -40,7 +44,11 @@ export async function autoAttachLibraryImage(
   postContent: string,
   hashtags: string[],
   topicTags: string[] = [],
-  options: { imageGenerationEnabled?: boolean } = {},
+  options: {
+    imageGenerationEnabled?: boolean;
+    /** Phase 17: pillar threaded into the Gemini prompt for an angle hint. */
+    pillar?: ContentPillar | null;
+  } = {},
 ): Promise<AutoAttachResult> {
   // ----- 0. Per-config opt-out -------------------------------------------
   if (options.imageGenerationEnabled === false) {
@@ -49,6 +57,44 @@ export async function autoAttachLibraryImage(
       { user_id: userId, ai_config_id: aiConfigId },
     );
     return { media_id: null, image_url: null, source: "none" };
+  }
+
+  // ----- (shared) Recent image refs for anti-repeat ----------------------
+  // We need this for BOTH the library exclusion AND the Gemini "do not
+  // look like these" hint. One read covers both.
+  let recentImageRefs: string[] = [];
+  let recentImageDescriptions: string[] = [];
+  if (aiConfigId) {
+    const { data: recentPosts } = await client
+      .from("posts")
+      .select("image_ref")
+      .eq("ai_config_id", aiConfigId)
+      .not("image_ref", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(10);
+    recentImageRefs = (recentPosts ?? [])
+      .map((p) => p.image_ref)
+      .filter((x): x is string => typeof x === "string" && x.length > 0);
+
+    const referencedMediaIds = recentImageRefs.filter(
+      (x) => x !== "generated",
+    );
+    if (referencedMediaIds.length > 0) {
+      const { data: descs } = await client
+        .from("media_library")
+        .select("id, ai_description, tags")
+        .in("id", referencedMediaIds);
+      const descMap = new Map<string, string>();
+      for (const d of descs ?? []) {
+        const desc =
+          (typeof d.ai_description === "string" && d.ai_description) ||
+          (Array.isArray(d.tags) ? d.tags.join(", ") : "");
+        if (desc) descMap.set(d.id, desc);
+      }
+      recentImageDescriptions = referencedMediaIds
+        .map((id) => descMap.get(id))
+        .filter((s): s is string => Boolean(s));
+    }
   }
 
   // ----- 1. Library lookup ------------------------------------------------
@@ -66,11 +112,28 @@ export async function autoAttachLibraryImage(
     return { media_id: null, image_url: null, source: "none" };
   }
 
-  const candidates = (data ?? []) as MediaLibraryRow[];
+  const rawCandidates = (data ?? []) as MediaLibraryRow[];
+  // Phase 17: exclude images used in the last 10 posts so library picks
+  // rotate. If the exclusion empties the candidate set entirely (small
+  // library), we fall back to using everything — better an old repeat
+  // than nothing.
+  const usedIds = new Set(
+    recentImageRefs.filter((x) => x !== "generated"),
+  );
+  let candidates = rawCandidates.filter((m) => !usedIds.has(m.id));
+  if (candidates.length === 0 && rawCandidates.length > 0) {
+    console.log(
+      "[media/autoSelect] anti-repeat would empty the library — picking from full set",
+      { user_id: userId, ai_config_id: aiConfigId, library_size: rawCandidates.length },
+    );
+    candidates = rawCandidates;
+  }
   console.log("[media/autoSelect] library candidates", {
     user_id: userId,
     ai_config_id: aiConfigId,
-    count: candidates.length,
+    raw_count: rawCandidates.length,
+    after_exclusion: candidates.length,
+    recent_image_refs: recentImageRefs.length,
   });
 
   if (candidates.length > 0) {
@@ -99,6 +162,8 @@ export async function autoAttachLibraryImage(
     postContent,
     topicTags,
     hashtags,
+    options.pillar ?? null,
+    recentImageDescriptions,
   );
   if (fallback) return fallback;
 
@@ -114,6 +179,8 @@ async function tryAiFallback(
   postContent: string,
   topicTags: string[],
   hashtags: string[],
+  pillar: ContentPillar | null,
+  recentImageDescriptions: string[],
 ): Promise<AutoAttachResult | null> {
   // a. Plan gate.
   const { data: profile } = await client
@@ -183,8 +250,13 @@ async function tryAiFallback(
     limit,
   });
 
-  // d. Generate.
-  const prompt = buildImagePromptFromPost(postContent, topicTags, hashtags);
+  // d. Generate. Phase 17: thread the selected pillar + recent image
+  //    descriptions into the Gemini prompt so the generator has
+  //    enough context to make visually distinct output.
+  const prompt = buildImagePromptFromPost(postContent, topicTags, hashtags, {
+    pillar,
+    recentImageDescriptions,
+  });
   let media: MediaLibraryRow;
   try {
     media = await generateAiImageForUser(client, userId, aiConfigId, prompt);
