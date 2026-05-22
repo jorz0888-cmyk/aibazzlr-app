@@ -257,6 +257,11 @@ export type AiConfig = {
   // -- Phase 16 (2026-05-22): per-config image attach toggle. When false,
   //    skip library lookup + Gemini fallback entirely (text-only). --
   image_generation_enabled: boolean;
+  // -- Phase 17 (2026-05-22): content diversity. Pillars = 8 angles
+  //    the AI rotates through (LLM-generated lazily). Each pillar:
+  //    { id (kebab slug), name, description }. The anti-recency
+  //    selector reads posts.pillar_id and weights by gap. --
+  content_pillars: ContentPillar[];
   // ----------------------------------------------
   created_at: string;
   updated_at: string;
@@ -273,6 +278,18 @@ export type MonthlyGoalKey =
 export type RecentTopicEntry = {
   topic: string;
   last_used: string;
+};
+
+/**
+ * Phase 17: a single "content pillar" — one of (typically) 8 distinct
+ * angles the AI rotates through to keep posts feeling fresh. id is a
+ * stable kebab-case slug used for anti-recency tracking (stored on
+ * posts.pillar_id); name + description are what the prompt sees.
+ */
+export type ContentPillar = {
+  id: string;
+  name: string;
+  description: string;
 };
 
 export type GenerationMetadata = {
@@ -330,6 +347,12 @@ export type Post = {
   topic_tags: string[];
   // Phase 11.5: first 30 chars of content for opening-diversity tracking
   opening_snippet: string | null;
+  // Phase 17: which content pillar produced this post + which image
+  // was attached (media_library UUID as text, or the literal
+  // "generated" for ephemeral Gemini images). Both nullable since
+  // pre-Phase-17 posts predate this columns.
+  pillar_id: string | null;
+  image_ref: string | null;
   // Legacy column (kept for back-compat)
   external_post_id: string | null;
   /** All engagement metrics live in this jsonb (likes/retweets/etc). */

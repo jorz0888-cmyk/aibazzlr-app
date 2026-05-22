@@ -27,6 +27,9 @@ export const AI_CONFIG_DEFAULTS = {
   // Phase 16: images are the differentiating feature, so default ON. UI
   // exposes a toggle that flips this to false for text-only configs.
   image_generation_enabled: true,
+  // Phase 17: pillars are generated lazily on first use, so the default
+  // is just an empty array.
+  content_pillars: [] as Array<{ id: string; name: string; description: string }>,
 };
 
 /**
