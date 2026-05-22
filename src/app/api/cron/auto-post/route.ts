@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { getAiConfigById } from "@/lib/db/ai-configs";
 import { generatePostDraft } from "@/lib/posts/generator";
+import { buildGenerateContext } from "@/lib/posts/generate-context";
 import { autoAttachLibraryImage } from "@/lib/media/autoSelect";
 import { recordTopicTags } from "@/lib/strategy/topic-tracking";
 import { publishPostToX } from "@/lib/posts/publisher";
@@ -240,25 +241,20 @@ async function processSchedule(
 
   // 1. Generate the draft via Claude. Phase 13: pass the scheduled JST clock
   //    so the strategy section can flag "this is an optimal time" for the
-  //    configured goal. Phase 11.5: also pass the last 10 opening snippets
-  //    so the generator avoids repeating its openings.
+  //    configured goal. Phase 17: pillar pick + seasonal hint + recent
+  //    bodies are now bundled in buildGenerateContext (lazy-mints
+  //    pillars on first use too).
   const scheduledTimeJst = `${String(schedule.hour).padStart(2, "0")}:${String(schedule.minute).padStart(2, "0")}`;
-  const { data: recentOpeningsRows } = await admin
-    .from("posts")
-    .select("opening_snippet")
-    .eq("ai_config_id", config.id)
-    .not("opening_snippet", "is", null)
-    .order("created_at", { ascending: false })
-    .limit(10);
-  const recentOpenings = (recentOpeningsRows ?? [])
-    .map((r) => r.opening_snippet)
-    .filter((s): s is string => typeof s === "string" && s.length > 0);
+  const genCtx = await buildGenerateContext(admin, config);
 
   let generated;
   try {
     generated = await generatePostDraft(config, undefined, {
       scheduledTimeJst,
-      recentOpenings,
+      recentOpenings: genCtx.recentOpenings,
+      pillar: genCtx.pillar,
+      seasonalHint: genCtx.seasonalHint,
+      recentBodies: genCtx.recentBodies,
     });
   } catch (e) {
     console.error("[cron/auto-post] generation failed", {
@@ -319,6 +315,14 @@ async function processSchedule(
     strategic_intent: generated.strategic_intent,
     topic_tags: generated.topic_tags,
     opening_snippet: generated.opening_snippet,
+    // Phase 17 diversity tracking.
+    pillar_id: generated.pillar_id,
+    image_ref:
+      picked.source === "library"
+        ? picked.media_id
+        : picked.source === "ai_generated"
+          ? "generated"
+          : null,
   });
 
   const { data: inserted, error: insertErr } = await admin

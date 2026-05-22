@@ -3,7 +3,11 @@ import {
   POST_MODEL,
   POST_MODEL_PRICE,
 } from "@/lib/ai/anthropic";
-import type { AiConfig, GenerationMetadata } from "@/lib/supabase/types";
+import type {
+  AiConfig,
+  ContentPillar,
+  GenerationMetadata,
+} from "@/lib/supabase/types";
 import { getMonthlyGoal } from "@/lib/strategy/monthly-goals";
 import { getAudiencePreset } from "@/lib/strategy/audience-presets";
 import { formatRecentTopicsForPrompt } from "@/lib/strategy/topic-tracking";
@@ -183,17 +187,58 @@ ${aiConfig.world_view ?? ""}
 
 export function buildUserPrompt(
   theme?: string,
-  context?: { recentOpenings?: string[] },
+  context?: {
+    recentOpenings?: string[];
+    /** Phase 17: the pillar selected by the anti-recency engine. */
+    pillar?: ContentPillar | null;
+    /** Phase 17: short JP phrase describing the current season. */
+    seasonalHint?: string | null;
+    /** Phase 17: 8–10 recent post bodies for "don't reuse these" cue. */
+    recentBodies?: string[];
+  },
 ): string {
   let base = theme && theme.trim()
     ? `今日の投稿を作成してください。テーマ: ${theme.trim()}`
     : "今日の投稿を作成してください。前回の投稿と異なる切り口でお願いします。";
 
+  // Phase 17: anti-recency-selected pillar. The system prompt teaches
+  // the persona; this line tells the model which angle to take for
+  // THIS post. Lives in user prompt so it varies per call (keeps the
+  // system prompt cache hot).
+  const pillar = context?.pillar;
+  if (pillar) {
+    base += `\n\n【今回の柱】\n${pillar.name} — ${pillar.description}\nこの切り口で投稿を組み立ててください。`;
+  }
+
+  // Phase 17: lightweight seasonal frame. Independent of pillar — model
+  // can lean in or ignore depending on whether the combo makes sense.
+  const seasonal = context?.seasonalHint?.trim();
+  if (seasonal) {
+    base += `\n\n【ゆるい季節背景】\n${seasonal}\n※ 自然な範囲で寄せてよいが、毎回触れる必要はない`;
+  }
+
+  // Phase 17: recent bodies for "don't repeat yourself" cue. More
+  // powerful than just openings since fresh-feeling posts also need
+  // to differ in structure and phrasing, not just first words. Kept
+  // to ~10 to bound the prompt cost.
+  const bodies = (context?.recentBodies ?? [])
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 10);
+  if (bodies.length > 0) {
+    base += `\n\n【このアカウントの最近の投稿（再利用禁止）】\n${bodies
+      .map((s, i) => `${i + 1}. ${s.slice(0, 140)}${s.length > 140 ? "…" : ""}`)
+      .join("\n")}\n\n上記の投稿と、話題・書き出し・文の構造を明確に変えること。これらに登場するフックや言い回しを再利用しないこと。`;
+  }
+
+  // Phase 11.5 (kept for back-compat / extra signal): just the openings.
+  // Less critical now that we pass full bodies above but it doesn't
+  // hurt and helps the model when bodies were truncated.
   const openings = (context?.recentOpenings ?? [])
     .map((s) => s.trim())
     .filter(Boolean)
     .slice(0, 10);
-  if (openings.length > 0) {
+  if (openings.length > 0 && bodies.length === 0) {
     base += `\n\n【直近の投稿の書き出し（避けるべきパターン）】\n${openings
       .map((s, i) => `${i + 1}. ${s}...`)
       .join("\n")}\n\n上記と **異なる切り口・書き出し** で投稿を作ること。同じ単語・同じ語感で始まる投稿が連続しないように。`;
@@ -211,6 +256,8 @@ export type GeneratedPost = {
   strategic_intent: string | null;
   /** Phase 11.5: first 30 chars of content for opening-diversity tracking. */
   opening_snippet: string;
+  /** Phase 17: id of the pillar the caller picked (or null if none). */
+  pillar_id: string | null;
   /** Phase 11.5: validator failures we accepted rather than blocked on. */
   warnings: string[];
   metadata: GenerationMetadata;
@@ -308,11 +355,25 @@ function toStringArray(v: unknown): string[] {
 export async function generatePostDraft(
   aiConfig: AiConfig,
   theme?: string,
-  context?: { scheduledTimeJst?: string; recentOpenings?: string[] },
+  context?: {
+    scheduledTimeJst?: string;
+    recentOpenings?: string[];
+    /** Phase 17: pre-selected pillar (anti-recency picked by caller). */
+    pillar?: ContentPillar | null;
+    /** Phase 17: getSeasonalHint() result, or null/empty to skip. */
+    seasonalHint?: string | null;
+    /** Phase 17: ~10 recent post bodies for the "don't repeat" cue. */
+    recentBodies?: string[];
+  },
 ): Promise<GeneratedPost> {
   const anthropic = getAnthropic();
   const system = buildSystemPrompt(aiConfig, context);
-  const baseUser = buildUserPrompt(theme, { recentOpenings: context?.recentOpenings });
+  const baseUser = buildUserPrompt(theme, {
+    recentOpenings: context?.recentOpenings,
+    pillar: context?.pillar,
+    seasonalHint: context?.seasonalHint,
+    recentBodies: context?.recentBodies,
+  });
   const attempts: string[] = [];
   const warnings: string[] = [];
 
@@ -488,6 +549,7 @@ export async function generatePostDraft(
     topic_tags: topicTags,
     strategic_intent: strategicIntent,
     opening_snippet: content.slice(0, 30),
+    pillar_id: context?.pillar?.id ?? null,
     warnings,
     metadata,
   };

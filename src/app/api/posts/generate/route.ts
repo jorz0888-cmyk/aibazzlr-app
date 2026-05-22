@@ -5,6 +5,7 @@ import { getSocialAccountById } from "@/lib/db/social-accounts";
 import { extractDbError } from "@/lib/db/error";
 import { applyPostDefaults } from "@/lib/db/post-defaults";
 import { generatePostDraft } from "@/lib/posts/generator";
+import { buildGenerateContext } from "@/lib/posts/generate-context";
 import { autoAttachLibraryImage } from "@/lib/media/autoSelect";
 import { recordTopicTags } from "@/lib/strategy/topic-tracking";
 import type { Platform } from "@/lib/supabase/types";
@@ -70,25 +71,20 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Phase 11.5: gather the last 10 opening snippets for this AI config so
-  // the generator can avoid repeating openings. Best-effort — empty array
-  // on any read failure.
-  const { data: recentOpeningsRows } = await supabase
-    .from("posts")
-    .select("opening_snippet")
-    .eq("ai_config_id", aiConfig.id)
-    .not("opening_snippet", "is", null)
-    .order("created_at", { ascending: false })
-    .limit(10);
-  const recentOpenings = (recentOpeningsRows ?? [])
-    .map((r) => r.opening_snippet)
-    .filter((s): s is string => typeof s === "string" && s.length > 0);
+  // Phase 17: build per-call context (pillar pick, seasonal hint,
+  // recent bodies, lazy pillar generation if empty). Replaces the
+  // standalone recentOpenings lookup — buildGenerateContext does that
+  // read internally now.
+  const genCtx = await buildGenerateContext(supabase, aiConfig);
 
   // 1. Generate via Claude
   let generated;
   try {
     generated = await generatePostDraft(aiConfig, body.theme, {
-      recentOpenings,
+      recentOpenings: genCtx.recentOpenings,
+      pillar: genCtx.pillar,
+      seasonalHint: genCtx.seasonalHint,
+      recentBodies: genCtx.recentBodies,
     });
   } catch (e) {
     console.error("[POSTS-GENERATE] AI failure", e);
@@ -136,6 +132,18 @@ export async function POST(request: NextRequest) {
     strategic_intent: generated.strategic_intent,
     topic_tags: generated.topic_tags,
     opening_snippet: generated.opening_snippet,
+    // Phase 17: which pillar this post belongs to (anti-recency tracking).
+    pillar_id: generated.pillar_id,
+    // Phase 17: which image we attached (or null for text-only). For
+    // library images we store the media_library UUID; for Gemini
+    // fallback we store the literal "generated" since the synthesized
+    // image isn't (yet) reusable from the library lookup.
+    image_ref:
+      picked.source === "library"
+        ? picked.media_id
+        : picked.source === "ai_generated"
+          ? "generated"
+          : null,
   });
 
   const { data, error } = await supabase
