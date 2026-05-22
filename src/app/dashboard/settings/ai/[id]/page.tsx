@@ -144,7 +144,7 @@ export default async function ConfigDetailPage({
         />
         <MaxPostLengthEditor
           configId={config.id}
-          initial={config.max_post_length ?? 280}
+          initial={config.max_post_length ?? 140}
         />
       </Card>
 
@@ -284,7 +284,10 @@ export default async function ConfigDetailPage({
         />
       </Card>
 
-      <MediaLibrarySection aiConfigId={config.id} />
+      <MediaLibrarySection
+        aiConfigId={config.id}
+        initialImageGenEnabled={config.image_generation_enabled ?? true}
+      />
 
       <AutoPostSection
         aiConfigId={config.id}

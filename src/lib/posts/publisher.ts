@@ -12,8 +12,22 @@ import {
 } from "@/lib/posts/x-api";
 import { readEnvOauth1Consumer } from "@/lib/posts/oauth1";
 import { decryptToken } from "@/lib/oauth/encryption";
+import { getAiConfigById } from "@/lib/db/ai-configs";
+import {
+  truncateRenderedTweet,
+  weightedRenderedTweet,
+} from "@/lib/posts/x-text";
 import type { Post, SocialAccount } from "@/lib/supabase/types";
 import type { DBClient } from "@/lib/db/_client-type";
+
+/**
+ * Non-Premium X account hard cap: 280 weighted characters. We use this
+ * as the absolute upper bound for the publisher pre-send guard so a
+ * config with a too-large max_post_length still can't blow X's actual
+ * limit. Premium / Premium+ users with larger caps are handled by
+ * respecting their config-level max_post_length instead.
+ */
+const X_FREE_TIER_WEIGHTED_CAP = 280;
 
 /**
  * Pick the right X auth for an account. When the row has OAuth 1.0a tokens
@@ -120,13 +134,56 @@ export async function publishPostToX(
     };
   }
 
+  // 2026-05-22 root-cause fix: every X failure traceable to length was
+  // a JS-`.length` vs X-weighted-count mismatch. Run the same weighted
+  // counter X uses *before* we send, and if it's over the cap, trim
+  // the body (preserving hashtags) until it fits. This is the last
+  // line of defence — the generator already tries to land under the
+  // cap, but image_url, hashtag overflow, etc. can still push it over.
+  //
+  // Effective cap: min(ai_config.max_post_length, 280 weighted). The
+  // 280-weighted ceiling protects Free-tier X accounts from ever
+  // sending more than X will accept, regardless of how high the user
+  // raised the config knob. Premium tier handling is deferred — when
+  // we add a per-account `x_plan` field we'll lift the ceiling
+  // conditionally here.
+  let originalContent = post.content;
+  let originalHashtags = post.hashtags ?? [];
+  let configuredCap = X_FREE_TIER_WEIGHTED_CAP;
+  if (post.ai_config_id) {
+    const cfg = await getAiConfigById(supabase, post.ai_config_id);
+    if (cfg?.max_post_length) {
+      configuredCap = Math.min(cfg.max_post_length, X_FREE_TIER_WEIGHTED_CAP);
+    }
+  }
+  const initialWeighted = weightedRenderedTweet(
+    originalContent,
+    originalHashtags,
+  );
+  const trimmed = truncateRenderedTweet(
+    originalContent,
+    originalHashtags,
+    configuredCap,
+  );
+  if (trimmed.truncated) {
+    console.warn("[publisher] tweet over weighted cap — truncated", {
+      post_id: post.id,
+      cap: configuredCap,
+      original_weighted: initialWeighted,
+      trimmed_weighted: weightedRenderedTweet(
+        trimmed.content,
+        trimmed.hashtags,
+      ),
+      dropped_hashtags:
+        trimmed.hashtags.length < originalHashtags.length,
+    });
+  }
   let tweetText: string;
   try {
-    // Disable the client-side length cap — the generator already enforces
-    // ai_configs.max_post_length, and for posts that slip past that the X
-    // server is the final authority. Hard-coding 280 here was a regression
-    // against Phase 14's per-config caps (1k / 4k / 25k for Premium tiers).
-    tweetText = buildTweetText(post.content, post.hashtags ?? [], null);
+    // Length enforcement is now upstream of buildTweetText (above) using
+    // X's weighted counter. Disable buildTweetText's own JS-length cap so
+    // we don't double-validate with the wrong metric.
+    tweetText = buildTweetText(trimmed.content, trimmed.hashtags, null);
   } catch (e) {
     return {
       ok: false,

@@ -9,6 +9,7 @@ import { PostEditorModal } from "./PostEditorModal";
 import { PublishConfirmDialog } from "./PublishConfirmDialog";
 import type { PostListItem } from "./types";
 import { friendlyErrorMessage } from "@/lib/errors/client";
+import { weightedRenderedTweet } from "@/lib/posts/x-text";
 
 // stuck = publishing status held for more than this. The pg_cron cleanup job
 // runs at the same threshold (5 min), so this UI warning means
@@ -267,14 +268,15 @@ export function PostCard({ post }: { post: PostListItem }) {
         )}
 
         {(() => {
-          // Phase 14: small character-count indicator. Mirrors
-          // buildTweetText so we read the same length the publisher sends.
-          const tags = (post.hashtags ?? []).filter(Boolean).join(" ");
-          const rendered = tags
-            ? `${post.content}\n\n${tags}`
-            : post.content;
-          const len = rendered.length;
-          const max = post.ai_config?.max_post_length ?? 280;
+          // 2026-05-22: use the X-weighted counter the publisher actually
+          // gates on, not raw JS string length. JP content scored ~2× low
+          // before this fix and the badge would say "OK" while the publish
+          // would 403 for length.
+          const len = weightedRenderedTweet(
+            post.content,
+            post.hashtags ?? [],
+          );
+          const max = post.ai_config?.max_post_length ?? 140;
           const over = len > max;
           const warn = !over && len >= Math.floor(max * 0.9);
           return (
@@ -288,10 +290,10 @@ export function PostCard({ post }: { post: PostListItem }) {
                     : "text-ink-subtle",
               ].join(" ")}
             >
-              ✏ {len} / {max} 文字
+              ✏ {len} / {max} 重み（X計測）
               {over && (
                 <span className="ml-2 font-sans">
-                  ⚠ 上限超過 — 投稿時に切り詰めの可能性
+                  ⚠ 上限超過 — 投稿時に末尾を切り詰めます
                 </span>
               )}
             </p>

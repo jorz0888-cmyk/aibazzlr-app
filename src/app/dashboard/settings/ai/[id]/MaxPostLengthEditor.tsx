@@ -6,11 +6,11 @@ import { Spinner } from "@/components/Spinner";
 import { useToast } from "@/components/common/Toast";
 
 const PRESETS: Array<{ value: number; label: string; hint: string }> = [
-  { value: 140, label: "140 文字", hint: "X 全角・安全側" },
-  { value: 280, label: "280 文字", hint: "X 標準" },
-  { value: 1000, label: "1,000 文字", hint: "X Premium" },
-  { value: 4000, label: "4,000 文字", hint: "X Premium" },
-  { value: 25000, label: "25,000 文字", hint: "X Premium+" },
+  { value: 140, label: "140 重み", hint: "日本語推奨" },
+  { value: 280, label: "280 重み", hint: "X 非Premium 上限" },
+  { value: 1000, label: "1,000 重み", hint: "X Premium" },
+  { value: 4000, label: "4,000 重み", hint: "X Premium" },
+  { value: 25000, label: "25,000 重み", hint: "X Premium+" },
 ];
 
 const PRESET_VALUES = new Set(PRESETS.map((p) => p.value));
@@ -65,7 +65,7 @@ export function MaxPostLengthEditor({
 
   return (
     <div className="grid grid-cols-[140px_1fr] items-start gap-3 border-b border-line py-2.5 last:border-b-0">
-      <span className="pt-1 text-xs text-ink-muted">投稿の最大文字数</span>
+      <span className="pt-1 text-xs text-ink-muted">投稿の最大重み</span>
       <div className="space-y-2">
         <div className="flex flex-wrap gap-2">
           {PRESETS.map((p) => {
@@ -122,10 +122,10 @@ export function MaxPostLengthEditor({
               className="input w-32"
               value={customStr}
               onChange={(e) => setCustomStr(e.target.value)}
-              placeholder="280"
+              placeholder="140"
               disabled={saving}
             />
-            <span className="text-xs text-ink-muted">文字</span>
+            <span className="text-xs text-ink-muted">重み</span>
             <button
               type="button"
               className="btn-primary px-3 py-2 text-xs"
@@ -146,8 +146,15 @@ export function MaxPostLengthEditor({
         )}
 
         <p className="text-[11px] leading-relaxed text-ink-subtle">
-          X Premium 未加入の場合は <b>280文字</b> を選択してください。<br />
-          投稿本文・ハッシュタグ・区切り文字を含めた合計に対する上限です。
+          <b className="text-ink">X 重み付き</b>：日本語1文字＝2重み、半角英数1文字＝
+          1重み、URL＝23重み固定。X 非Premium の上限は 280 重みです。
+          <br />
+          <b className="text-ink">日本語中心・非Premium</b> なら{" "}
+          <b className="text-cyan">140 重み</b>（推奨）が安全
+          — ハッシュタグや URL が足されても X の上限に余裕を残せます。
+          280 を選ぶと境界ギリギリで、AI 出力が少しブレるだけで X から
+          拒否されることがあります。<br />
+          投稿本文・ハッシュタグ・区切り文字を含めた合計が上限です。
         </p>
 
         {err && <p className="text-xs text-danger">{err}</p>}

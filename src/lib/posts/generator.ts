@@ -12,6 +12,7 @@ import {
   validateJapaneseOutput,
   type DetectedRun,
 } from "./validators";
+import { weightedRenderedTweet } from "./x-text";
 
 const REAL_MODE_GUARD = `
 
@@ -39,6 +40,11 @@ function outputFormat(maxLen: number): string {
   // The hard guarantee is total ≤ maxLen; this hint is just to steer the
   // model so it doesn't bump up against the limit every time.
   const contentBudget = Math.max(50, maxLen - 60);
+  // X uses a "weighted character" count: CJK / emoji / 全角句読点 = 2, ASCII /
+  // 半角 = 1, URL = 23 fixed. So a 140 weighted limit ≈ 70 Japanese chars
+  // (or ~140 ASCII chars). Teaching the model this explicitly keeps it
+  // from over-counting when retrying.
+  const jpCharBudget = Math.max(25, Math.floor(maxLen / 2) - 30);
   return `
 
 【出力形式】
@@ -53,10 +59,10 @@ function outputFormat(maxLen: number): string {
 }
 \`\`\`
 
-【文字数制約（厳守）】
-- 投稿本文 + ハッシュタグ + 区切り文字 の **合計を ${maxLen} 文字以内** に必ず収める
-- content は目安として ${contentBudget} 文字以内に
-- 全角・半角を問わずカウント、改行も1文字としてカウント
+【文字数制約（厳守 — X重み付き）】
+- 投稿本文 + ハッシュタグ + 区切り文字 の **合計を ${maxLen} 重み以内** に
+- X の数え方: 日本語1文字＝2重み、半角英数1文字＝1重み、URL＝23重み固定
+- 目安: 日本語中心なら content 約 ${jpCharBudget} 文字以内（${contentBudget} 重み以内）
 - 上限を超えた出力は無効とみなされ再生成されます
 
 【制約】
@@ -68,18 +74,19 @@ function outputFormat(maxLen: number): string {
 }
 
 /**
- * Compute the rendered tweet length the way the publisher actually sends
- * it (content + "\n\n" + space-separated hashtags). Mirrors
- * buildTweetText in src/lib/posts/x-api.ts so the validator and the
- * publisher agree on length.
+ * Compute the rendered tweet length the way X scores it ("weighted
+ * characters" — CJK / emoji = 2, ASCII = 1, URL = 23). Mirrors the
+ * publisher's pre-send check via the shared helper in x-text.ts so the
+ * generator and publisher agree byte-for-byte on what fits.
+ *
+ * Replaces the old JS `.length` count — that under-counted JP drafts by
+ * roughly 2× and caused X to reject 280-cap configs with 403/422.
  */
 export function computeTweetLength(
   content: string,
   hashtags: string[],
 ): number {
-  const tags = (hashtags ?? []).filter(Boolean).join(" ");
-  const rendered = tags ? `${content}\n\n${tags}` : content;
-  return rendered.length;
+  return weightedRenderedTweet(content, hashtags);
 }
 
 function buildStrategySection(
@@ -170,7 +177,7 @@ ${aiConfig.world_view ?? ""}
   prompt += LANGUAGE_GUARD;
 
   // Phase 14: include the per-config length cap in the output format.
-  prompt += outputFormat(aiConfig.max_post_length ?? 280);
+  prompt += outputFormat(aiConfig.max_post_length ?? 140);
   return prompt;
 }
 
@@ -314,7 +321,7 @@ export async function generatePostDraft(
   // length against the AI config's max_post_length cap. Either failure
   // triggers a retry with combined feedback. If both checks pass we break.
   const MAX_ATTEMPTS = 2;
-  const maxLen = aiConfig.max_post_length ?? 280;
+  const maxLen = aiConfig.max_post_length ?? 140;
   let resp;
   let text = "";
   let lastDetected: DetectedRun[] = [];

@@ -294,6 +294,7 @@ async function processSchedule(
     generated.content,
     generated.hashtags,
     generated.topic_tags,
+    { imageGenerationEnabled: config.image_generation_enabled },
   );
   console.log("[cron/auto-post] image attach result", {
     schedule_id: schedule.id,

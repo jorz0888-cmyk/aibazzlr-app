@@ -16,8 +16,10 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function MediaLibrarySection({
   aiConfigId,
+  initialImageGenEnabled,
 }: {
   aiConfigId: string;
+  initialImageGenEnabled: boolean;
 }) {
   const toast = useToast();
   const [items, setItems] = useState<MediaLibraryRow[] | null>(null);
@@ -25,7 +27,38 @@ export function MediaLibrarySection({
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [detail, setDetail] = useState<MediaLibraryRow | null>(null);
+  const [imageGenEnabled, setImageGenEnabled] = useState(
+    initialImageGenEnabled,
+  );
+  const [savingToggle, setSavingToggle] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  async function toggleImageGeneration(next: boolean) {
+    setErr(null);
+    setSavingToggle(true);
+    const prev = imageGenEnabled;
+    setImageGenEnabled(next);
+    try {
+      await jsonFetch(`/api/ai-configs/${aiConfigId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image_generation_enabled: next }),
+      });
+      toast.success(
+        next ? "画像生成を ON にしました" : "画像生成を OFF にしました",
+        {
+          description: next
+            ? "投稿に自動で画像が添付されます（ライブラリ→AI生成の順）"
+            : "投稿はテキストのみになります",
+        },
+      );
+    } catch (e) {
+      setImageGenEnabled(prev);
+      setErr(e instanceof Error ? e.message : "切替に失敗しました");
+    } finally {
+      setSavingToggle(false);
+    }
+  }
 
   const reload = useCallback(async () => {
     try {
@@ -103,18 +136,44 @@ export function MediaLibrarySection({
   return (
     <section className="card space-y-4 p-5 transition hover:border-cyan/20">
       <header className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <h2 className="text-sm font-bold uppercase tracking-wider text-ink-muted">
             写真ライブラリ
           </h2>
           <p className="mt-1 text-[11px] text-ink-subtle">
             写真をアップロードすると、AI が自動でタグ付け→投稿内容に合う1枚を選んで添付します。
+            ライブラリが空でも、有料プランなら AI が画像を自動生成して添付します。
           </p>
         </div>
-        {items && items.some((m) => !m.ai_description) && (
-          <BackfillButton onDone={reload} />
-        )}
+        <div className="flex items-center gap-3">
+          {items && items.some((m) => !m.ai_description) && (
+            <BackfillButton onDone={reload} />
+          )}
+          <label className="flex shrink-0 items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={imageGenEnabled}
+              disabled={savingToggle}
+              onChange={(e) => void toggleImageGeneration(e.target.checked)}
+            />
+            <span
+              className={
+                imageGenEnabled ? "font-bold text-cyan" : "text-ink-muted"
+              }
+            >
+              画像生成 {imageGenEnabled ? "ON" : "OFF"}
+            </span>
+          </label>
+        </div>
       </header>
+
+      {!imageGenEnabled && (
+        <div className="rounded-md border border-line bg-white/5 p-3 text-[11px] leading-relaxed text-ink-muted">
+          画像生成は <b className="text-ink">OFF</b> になっています。
+          ドラフト生成・自動投稿はテキストのみで実行され、ライブラリの写真や
+          AI画像生成は使用しません（写真のアップロード自体は引き続き可能です）。
+        </div>
+      )}
 
       <div
         onDragOver={(e) => {

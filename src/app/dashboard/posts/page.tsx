@@ -39,7 +39,7 @@ export default async function PostsPage() {
                 id: c.id,
                 name: c.name,
                 account_mode: c.account_mode,
-                max_post_length: c.max_post_length ?? 280,
+                max_post_length: c.max_post_length ?? 140,
               }
             : null;
         })()

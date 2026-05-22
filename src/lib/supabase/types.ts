@@ -254,6 +254,9 @@ export type AiConfig = {
   recent_topics: RecentTopicEntry[];
   // -- Phase 14: post length cap (X plan-dependent) --
   max_post_length: number;
+  // -- Phase 16 (2026-05-22): per-config image attach toggle. When false,
+  //    skip library lookup + Gemini fallback entirely (text-only). --
+  image_generation_enabled: boolean;
   // ----------------------------------------------
   created_at: string;
   updated_at: string;

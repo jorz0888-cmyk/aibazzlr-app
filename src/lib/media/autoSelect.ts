@@ -21,6 +21,8 @@ export type AutoAttachResult = {
 /**
  * Resolve a post image for both manual and cron-triggered draft
  * generation. Tries, in order:
+ *   0. (Phase 16) Skip entirely when image_generation_enabled=false on
+ *      the config — caller explicitly opted out of image attachment.
  *   1. Library lookup (Claude picks the best fit if any candidates).
  *   2. Gemini fallback — only for paid plans, only if quota remains,
  *      only if GEMINI_API_KEY is configured. Increments the period's
@@ -38,7 +40,17 @@ export async function autoAttachLibraryImage(
   postContent: string,
   hashtags: string[],
   topicTags: string[] = [],
+  options: { imageGenerationEnabled?: boolean } = {},
 ): Promise<AutoAttachResult> {
+  // ----- 0. Per-config opt-out -------------------------------------------
+  if (options.imageGenerationEnabled === false) {
+    console.log(
+      "[media/autoSelect] image attach skipped — image_generation_enabled is OFF",
+      { user_id: userId, ai_config_id: aiConfigId },
+    );
+    return { media_id: null, image_url: null, source: "none" };
+  }
+
   // ----- 1. Library lookup ------------------------------------------------
   let query = client
     .from("media_library")

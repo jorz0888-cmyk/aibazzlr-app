@@ -26,6 +26,7 @@ const NOT_NULL_FIELDS = new Set<keyof AiConfigUpdate>([
   "is_default",
   "hashtags_per_post",
   "account_mode",
+  "image_generation_enabled",
 ]);
 
 const ARRAY_FIELDS = new Set<keyof AiConfigUpdate>([
@@ -109,6 +110,8 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     "target_audience_description",
     // Phase 14 post length cap
     "max_post_length",
+    // Phase 16 image attach toggle
+    "image_generation_enabled",
   ];
   for (const key of passthrough) {
     if (key in body) {

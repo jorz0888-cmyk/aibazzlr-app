@@ -110,6 +110,7 @@ export async function POST(request: NextRequest) {
     generated.content,
     generated.hashtags,
     generated.topic_tags,
+    { imageGenerationEnabled: aiConfig.image_generation_enabled },
   );
   console.log("[POSTS-GENERATE] image attach result", {
     user_id: user.id,

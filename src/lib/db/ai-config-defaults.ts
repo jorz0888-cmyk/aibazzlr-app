@@ -24,6 +24,9 @@ export const AI_CONFIG_DEFAULTS = {
   seasonal_items: [] as string[],
   real_episodes: [] as string[],
   announcement_topics: [] as string[],
+  // Phase 16: images are the differentiating feature, so default ON. UI
+  // exposes a toggle that flips this to false for text-only configs.
+  image_generation_enabled: true,
 };
 
 /**
