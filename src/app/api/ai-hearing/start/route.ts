@@ -126,16 +126,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 4. Best-effort: bump current_step to 1 (skip silently if column missing) -
-  await supabase
-    .from("ai_hearing_sessions")
-    .update({ current_step: 1 })
-    .eq("id", data.id)
-    .then(({ error: stepErr }) => {
-      if (stepErr) {
-        console.warn("[hearing/start] current_step update skipped", stepErr);
-      }
-    });
+  // 2026-05-23 off-by-one fix: do NOT bump current_step to 1 here.
+  // Previously this set step=1 immediately after insert, meaning
+  // "AI's opening question has been sent". But the UI interprets
+  // current_step as "user answers given", so step=1 with zero user
+  // replies caused a chain-reaction off-by-one that made the banner
+  // fire after the user's 9th answer (when AI sent Q10). The new
+  // contract: current_step = number of user replies. Initial = 0.
+  // /message bumps it on each user reply (see that route for the
+  // matching change). DB default is 0, so no explicit write needed.
 
   return NextResponse.json({ sessionId: data.id });
 }

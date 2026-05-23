@@ -242,12 +242,23 @@ export async function POST(request: NextRequest, { params }: Ctx) {
             );
           }
         } else {
+          // 2026-05-23 off-by-one fix: count USER answers given so
+          // far, not AI questions sent. Previously we did
+          // `session.current_step + 1` which (combined with /start
+          // bumping to 1) ticked once per AI question — so the
+          // counter hit 10 the moment AI sent Q10, BEFORE the user
+          // answered it, firing the "10/10 完了" banner mid-flow.
+          //
+          // messagesWithUser already includes the user message we
+          // just persisted at the top of this handler, so its user-
+          // role count is exactly "answers given through this turn".
+          // Cap at TOTAL_HEARING_STEPS for sessions that exceed it.
+          const userAnswerCount = messagesWithUser.filter(
+            (m) => m.role === "user",
+          ).length;
           await updateHearingSession(supabase, sessionId, {
             messages: [...messagesWithUser, assistantMsg],
-            current_step: Math.min(
-              session.current_step + 1,
-              TOTAL_HEARING_STEPS,
-            ),
+            current_step: Math.min(userAnswerCount, TOTAL_HEARING_STEPS),
           });
         }
       } catch (e) {
