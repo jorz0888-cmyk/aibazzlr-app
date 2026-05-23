@@ -27,6 +27,7 @@ const NOT_NULL_FIELDS = new Set<keyof AiConfigUpdate>([
   "hashtags_per_post",
   "account_mode",
   "image_generation_enabled",
+  "image_source",
 ]);
 
 const ARRAY_FIELDS = new Set<keyof AiConfigUpdate>([
@@ -112,6 +113,10 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     "max_post_length",
     // Phase 16 image attach toggle
     "image_generation_enabled",
+    // Phase 20: 3-way image source enum (library_only / ai_only / both).
+    // DB CHECK constraint enforces the literal set; UI sends one of
+    // them via the MediaLibrarySection radio.
+    "image_source",
   ];
   for (const key of passthrough) {
     if (key in body) {

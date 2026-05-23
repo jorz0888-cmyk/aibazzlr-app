@@ -26,7 +26,13 @@ export const AI_CONFIG_DEFAULTS = {
   announcement_topics: [] as string[],
   // Phase 16: images are the differentiating feature, so default ON. UI
   // exposes a toggle that flips this to false for text-only configs.
+  // DEPRECATED in favour of image_source.
   image_generation_enabled: true,
+  // Phase 20 (2026-05-24): 'both' is the strongest UX default —
+  // upload first, Gemini fallback as the pool grows. Never write a
+  // raw string here without going through this default; the DB
+  // CHECK ai_configs_image_source_check rejects unknown values.
+  image_source: "both" as const,
   // Phase 17: pillars are generated lazily on first use, so the default
   // is just an empty array.
   content_pillars: [] as Array<{ id: string; name: string; description: string }>,

@@ -301,7 +301,15 @@ export default async function ConfigDetailPage({
 
       <MediaLibrarySection
         aiConfigId={config.id}
-        initialImageGenEnabled={config.image_generation_enabled ?? true}
+        // Phase 20: prefer image_source. Older rows that predate the
+        // migration (none in prod after backfill, but defensive) map
+        // image_generation_enabled=false → library_only, true → both.
+        initialImageSource={
+          config.image_source ??
+          (config.image_generation_enabled === false
+            ? "library_only"
+            : "both")
+        }
       />
 
       <AutoPostSection

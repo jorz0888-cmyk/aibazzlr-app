@@ -107,6 +107,12 @@ export async function POST(request: NextRequest) {
     generated.hashtags,
     generated.topic_tags,
     {
+      // Phase 20: image_source replaces the boolean toggle.
+      // Backward-compat: when a row predates the migration and has
+      // image_source absent (null in the JSON cast), fall through to
+      // image_generation_enabled. The migration backfilled all
+      // existing rows so this fallback should be unreachable in prod.
+      imageSource: aiConfig.image_source ?? undefined,
       imageGenerationEnabled: aiConfig.image_generation_enabled,
       pillar: genCtx.pillar,
     },
@@ -137,16 +143,13 @@ export async function POST(request: NextRequest) {
     opening_snippet: generated.opening_snippet,
     // Phase 17: which pillar this post belongs to (anti-recency tracking).
     pillar_id: generated.pillar_id,
-    // Phase 17: which image we attached (or null for text-only). For
-    // library images we store the media_library UUID; for Gemini
-    // fallback we store the literal "generated" since the synthesized
-    // image isn't (yet) reusable from the library lookup.
-    image_ref:
-      picked.source === "library"
-        ? picked.media_id
-        : picked.source === "ai_generated"
-          ? "generated"
-          : null,
+    // Phase 20 (2026-05-24): image_ref is now ALWAYS the real
+    // media_library UUID. The previous "generated" sentinel hid
+    // AI-generated images from the anti-recency filter, which is
+    // exactly why 3 sequential drafts attached the same Gemini
+    // image. picked.media_id is the row id of the AI image too
+    // (generateAiImageForUser saves it before returning).
+    image_ref: picked.media_id ?? null,
   });
 
   const { data, error } = await supabase

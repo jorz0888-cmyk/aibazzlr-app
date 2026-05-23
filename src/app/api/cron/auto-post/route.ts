@@ -291,6 +291,10 @@ async function processSchedule(
     generated.hashtags,
     generated.topic_tags,
     {
+      // Phase 20: image_source replaces the boolean toggle. See the
+      // matching comment in /api/posts/generate for the back-compat
+      // reasoning.
+      imageSource: config.image_source ?? undefined,
       imageGenerationEnabled: config.image_generation_enabled,
       pillar: genCtx.pillar,
     },
@@ -320,12 +324,8 @@ async function processSchedule(
     opening_snippet: generated.opening_snippet,
     // Phase 17 diversity tracking.
     pillar_id: generated.pillar_id,
-    image_ref:
-      picked.source === "library"
-        ? picked.media_id
-        : picked.source === "ai_generated"
-          ? "generated"
-          : null,
+    // Phase 20: real media_id always (no "generated" sentinel).
+    image_ref: picked.media_id ?? null,
   });
 
   const { data: inserted, error: insertErr } = await admin

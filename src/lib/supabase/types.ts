@@ -31,6 +31,16 @@ export type PostStatus =
   | "cancelled";
 
 export type PostingMode = "auto" | "approval" | "manual";
+
+/**
+ * Phase 20 (2026-05-24): per-config image-source policy.
+ *   library_only = only attach photos the user uploaded; never
+ *                  call Gemini even when the pool is empty.
+ *   ai_only      = always call Gemini; ignore uploads.
+ *   both         = upload first (rotated), fall back to Gemini
+ *                  pool-building if pool is small. Recommended.
+ */
+export type ImageSource = "library_only" | "ai_only" | "both";
 export type TriggeredBy = "manual" | "schedule";
 
 export type MediaSource = "upload" | "ai_generated";
@@ -255,8 +265,15 @@ export type AiConfig = {
   // -- Phase 14: post length cap (X plan-dependent) --
   max_post_length: number;
   // -- Phase 16 (2026-05-22): per-config image attach toggle. When false,
-  //    skip library lookup + Gemini fallback entirely (text-only). --
+  //    skip library lookup + Gemini fallback entirely (text-only).
+  //    DEPRECATED in favour of image_source — kept for back-compat
+  //    until a follow-up migration drops the column. --
   image_generation_enabled: boolean;
+  // -- Phase 20 (2026-05-24): per-config image-source policy.
+  //    'library_only' = only uploaded photos (no Gemini call)
+  //    'ai_only'      = only Gemini (ignore uploaded photos)
+  //    'both'         = upload → Gemini fallback (recommended default) --
+  image_source: ImageSource;
   // -- Phase 17 (2026-05-22): content diversity. Pillars = 8 angles
   //    the AI rotates through (LLM-generated lazily). Each pillar:
   //    { id (kebab slug), name, description }. The anti-recency

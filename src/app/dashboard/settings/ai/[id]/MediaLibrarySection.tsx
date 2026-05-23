@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Spinner } from "@/components/Spinner";
 import { useToast } from "@/components/common/Toast";
-import type { MediaLibraryRow } from "@/lib/supabase/types";
+import type { ImageSource, MediaLibraryRow } from "@/lib/supabase/types";
 
 import { friendlyErrorMessage } from "@/lib/errors/client";
 
@@ -16,10 +16,10 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function MediaLibrarySection({
   aiConfigId,
-  initialImageGenEnabled,
+  initialImageSource,
 }: {
   aiConfigId: string;
-  initialImageGenEnabled: boolean;
+  initialImageSource: ImageSource;
 }) {
   const toast = useToast();
   const [items, setItems] = useState<MediaLibraryRow[] | null>(null);
@@ -27,33 +27,41 @@ export function MediaLibrarySection({
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [detail, setDetail] = useState<MediaLibraryRow | null>(null);
-  const [imageGenEnabled, setImageGenEnabled] = useState(
-    initialImageGenEnabled,
-  );
+  const [imageSource, setImageSource] =
+    useState<ImageSource>(initialImageSource);
   const [savingToggle, setSavingToggle] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  async function toggleImageGeneration(next: boolean) {
+  async function setImageSourceTo(next: ImageSource) {
+    if (next === imageSource) return;
     setErr(null);
     setSavingToggle(true);
-    const prev = imageGenEnabled;
-    setImageGenEnabled(next);
+    const prev = imageSource;
+    setImageSource(next);
     try {
       await jsonFetch(`/api/ai-configs/${aiConfigId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image_generation_enabled: next }),
+        body: JSON.stringify({ image_source: next }),
       });
-      toast.success(
-        next ? "画像生成を ON にしました" : "画像生成を OFF にしました",
-        {
-          description: next
-            ? "投稿に自動で画像が添付されます（ライブラリ→AI生成の順）"
-            : "投稿はテキストのみになります",
-        },
-      );
+      const labels: Record<ImageSource, string> = {
+        library_only: "アップロード写真のみ",
+        ai_only: "AI 生成のみ",
+        both: "アップロード + AI（両方）",
+      };
+      const descriptions: Record<ImageSource, string> = {
+        library_only:
+          "アップロードした写真の中からローテーションで添付します",
+        ai_only:
+          "AI が画像を生成して添付します（月間生成枚数の上限内）",
+        both:
+          "アップロード写真を優先し、足りないぶんを AI が補います",
+      };
+      toast.success(`画像ソース：${labels[next]}`, {
+        description: descriptions[next],
+      });
     } catch (e) {
-      setImageGenEnabled(prev);
+      setImageSource(prev);
       setErr(e instanceof Error ? e.message : "切替に失敗しました");
     } finally {
       setSavingToggle(false);
@@ -141,39 +149,45 @@ export function MediaLibrarySection({
             写真ライブラリ
           </h2>
           <p className="mt-1 text-[11px] text-ink-subtle">
-            写真をアップロードすると、AI が自動でタグ付け→投稿内容に合う1枚を選んで添付します。
-            ライブラリが空でも、有料プランなら AI が画像を自動生成して添付します。
+            投稿に添付する画像のソースを下で選び、必要なら写真をアップロードします。
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          {items && items.some((m) => !m.ai_description) && (
-            <BackfillButton onDone={reload} />
-          )}
-          <label className="flex shrink-0 items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={imageGenEnabled}
-              disabled={savingToggle}
-              onChange={(e) => void toggleImageGeneration(e.target.checked)}
-            />
-            <span
-              className={
-                imageGenEnabled ? "font-bold text-cyan" : "text-ink-muted"
-              }
-            >
-              画像生成 {imageGenEnabled ? "ON" : "OFF"}
-            </span>
-          </label>
-        </div>
+        {items && items.some((m) => !m.ai_description) && (
+          <BackfillButton onDone={reload} />
+        )}
       </header>
 
-      {!imageGenEnabled && (
-        <div className="rounded-md border border-line bg-white/5 p-3 text-[11px] leading-relaxed text-ink-muted">
-          画像生成は <b className="text-ink">OFF</b> になっています。
-          ドラフト生成・自動投稿はテキストのみで実行され、ライブラリの写真や
-          AI画像生成は使用しません（写真のアップロード自体は引き続き可能です）。
+      <fieldset className="rounded-md border border-line bg-white/5 p-3">
+        <legend className="px-1 text-[11px] font-bold uppercase tracking-wider text-ink-muted">
+          画像ソース
+        </legend>
+        <div className="space-y-1.5 text-[12px]">
+          <ImageSourceRadio
+            value="both"
+            current={imageSource}
+            disabled={savingToggle}
+            onChange={setImageSourceTo}
+            label="アップロード + AI（推奨）"
+            description="アップロードした写真を優先し、足りないぶんは AI が生成して補います。"
+          />
+          <ImageSourceRadio
+            value="library_only"
+            current={imageSource}
+            disabled={savingToggle}
+            onChange={setImageSourceTo}
+            label="アップロード写真のみ"
+            description="AI 画像生成を使わず、ご自身でアップロードした写真からのみ選びます。本物のお店向き。"
+          />
+          <ImageSourceRadio
+            value="ai_only"
+            current={imageSource}
+            disabled={savingToggle}
+            onChange={setImageSourceTo}
+            label="AI 生成のみ"
+            description="AI が毎回画像を生成して添付します（プラン上限内）。情報・キャラクター系アカウント向き。"
+          />
         </div>
-      )}
+      </fieldset>
 
       <div
         onDragOver={(e) => {
@@ -467,5 +481,53 @@ function MediaDetailModal({
         </footer>
       </div>
     </div>
+  );
+}
+
+
+function ImageSourceRadio({
+  value,
+  current,
+  disabled,
+  onChange,
+  label,
+  description,
+}: {
+  value: ImageSource;
+  current: ImageSource;
+  disabled: boolean;
+  onChange: (next: ImageSource) => void;
+  label: string;
+  description: string;
+}) {
+  const active = current === value;
+  return (
+    <label
+      className={[
+        "flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 transition",
+        active
+          ? "border-cyan/60 bg-cyan/10"
+          : "border-line hover:border-cyan/30",
+        disabled ? "pointer-events-none opacity-60" : "",
+      ].join(" ")}
+    >
+      <input
+        type="radio"
+        name="image-source"
+        value={value}
+        checked={active}
+        disabled={disabled}
+        onChange={() => onChange(value)}
+        className="mt-0.5 accent-cyan"
+      />
+      <div className="min-w-0">
+        <div className={active ? "font-bold text-cyan" : "text-ink"}>
+          {label}
+        </div>
+        <div className="mt-0.5 text-[11px] leading-relaxed text-ink-muted">
+          {description}
+        </div>
+      </div>
+    </label>
   );
 }
