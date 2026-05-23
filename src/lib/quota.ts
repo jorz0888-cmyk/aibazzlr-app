@@ -124,11 +124,47 @@ const DAILY_LABEL: Record<DailyQuotaType, string> = {
   test_post: "テスト投稿",
 };
 
+function nextResetJstDescription(resetAt: Date): string {
+  // JST resets — let the user see a concrete clock time instead of a
+  // vague "tomorrow". 24h sliding window so it really is "翌日のこの時刻".
+  const jst = new Date(resetAt.getTime() + 9 * 60 * 60 * 1000);
+  const M = jst.getUTCMonth() + 1;
+  const D = jst.getUTCDate();
+  const h = String(jst.getUTCHours()).padStart(2, "0");
+  const m = String(jst.getUTCMinutes()).padStart(2, "0");
+  return `${M}月${D}日 ${h}:${m} (JST)`;
+}
+
+function quotaRemediation(plan: Plan, quotaType: DailyQuotaType): string {
+  // Per-plan remediation copy. Free users see the upgrade nudge; paid
+  // users see "wait / contact support" instead of being told to upgrade
+  // a plan they're already on the top of.
+  if (plan === "free") {
+    return "プランをアップグレードすると上限が上がります（Standardは1日3回、Premiumは1日10回まで）。";
+  }
+  if (plan === "standard" && quotaType === "hearing") {
+    return "Premium プランにアップグレードすると 1日10回まで利用できます。";
+  }
+  return "上限のリセットまでお待ちいただくか、サポートまでご相談ください。";
+}
+
 export function quotaExceededResponse(result: QuotaResult): NextResponse {
+  // 2026-05-23 T3: expanded JP message that names the quota, shows a
+  // concrete JST reset clock, and offers a remediation. The previous
+  // copy ("明日また使えるようになります") was technically correct but
+  // didn't tell the user what time, or what their options were.
+  const resetLabel = nextResetJstDescription(result.resetAt);
+  const remediation = quotaRemediation(result.plan, result.quotaType);
+  const message =
+    `本日の${DAILY_LABEL[result.quotaType]}回数の上限` +
+    `（${result.limit}回／1日）に達しました。` +
+    `${resetLabel} 頃にリセットされます。\n` +
+    remediation;
+
   return NextResponse.json(
     {
       error: "daily_quota_exceeded",
-      message: `本日の${DAILY_LABEL[result.quotaType]}回数の上限（${result.limit}回）に達しました。明日また使えるようになります。`,
+      message,
       details: {
         current: result.current,
         limit: result.limit,
@@ -286,10 +322,15 @@ export async function checkAiConfigQuota(
   const plan = (profile?.plan ?? "free") as Plan;
   const limit = getPlanLimits(plan).ai_configs_max;
 
+  // 2026-05-23 T1: count only active configs. Drafts (auto-saved
+  // after a hearing finalize) shouldn't count against the plan limit
+  // because they aren't "in use" yet — counting them would punish the
+  // user for having taken a hearing they later decided not to activate.
   const { count } = await supabase
     .from("ai_configs")
     .select("id", { count: "exact", head: true })
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .eq("status", "active");
 
   const current = count ?? 0;
   return {

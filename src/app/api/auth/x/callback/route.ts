@@ -201,6 +201,27 @@ export async function GET(request: NextRequest) {
 
     if (upsertError) {
       const info = extractDbError(upsertError);
+      // 2026-05-23 T6: convert the race-condition fallthrough into
+      // the same x_account_already_linked redirect the pre-check
+      // uses. Two users completing OAuth on the same X account at
+      // the same time race against the partial unique index
+      // social_accounts_active_platform_account_unique; the loser
+      // hits a Postgres 23505 here. Without this catch they'd see
+      // a generic "save_failed" message with a raw DB error.
+      if (
+        info.code === "23505" &&
+        (info.message.includes("social_accounts_active_platform_account_unique") ||
+          info.message.includes("platform_account_id"))
+      ) {
+        console.warn(
+          "[X-OAUTH-CALLBACK] race lost to global unique — converting to x_account_already_linked",
+          { xUserId: xUser.id, xUsername: xUser.username, userId: user.id },
+        );
+        return redirectWithParams(target, {
+          error: "x_account_already_linked",
+          detail: `@${xUser.username} は別の AIBazzlr アカウントで既に連携されています。元のアカウントで連携を解除してから再度お試しください。`,
+        });
+      }
       console.error("[X-OAUTH-CALLBACK] DB save failed", info);
       return redirectWithParams(target, {
         error: "save_failed",

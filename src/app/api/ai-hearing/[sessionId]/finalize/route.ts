@@ -14,9 +14,18 @@ import { normalizeExtractedData } from "@/lib/ai/normalize-extracted";
 import {
   normalizeAccountMode,
   type AccountMode,
+  type AiConfigInsert,
+  type AiConfigUpdate,
   type ExtractedHearingData,
   type HearingMessage,
 } from "@/lib/supabase/types";
+import { applyAiConfigDefaults } from "@/lib/db/ai-config-defaults";
+import {
+  createAiConfig,
+  getAiConfigById,
+  updateAiConfig,
+} from "@/lib/db/ai-configs";
+import { toStringArray } from "@/lib/ai/normalize-extracted";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -172,6 +181,117 @@ async function saveFinalized(
 }
 
 /**
+ * 2026-05-23 T1: auto-persist the finalized hearing result as an
+ * ai_configs row with status='draft' the moment finalize completes.
+ *
+ * Why: the previous flow required users to press the "保存" button on
+ * the preview page; press-forgetting (or just navigating away)
+ * silently lost ~10 minutes of hearing work. Auto-draft makes that
+ * impossible — the preview page becomes a confirm/edit/activate
+ * screen instead of a save-or-lose screen.
+ *
+ * Idempotent on session.ai_config_id:
+ *   - first call → INSERT + link session.ai_config_id
+ *   - subsequent calls (cached finalize, re-finalize) → UPDATE in
+ *     place. If the user already pressed Activate (status='active'),
+ *     we DO NOT downgrade back to 'draft', and we don't clobber any
+ *     edits they made on the activated config from the AI設定詳細
+ *     page — UPDATE only refreshes fields the AI re-extraction
+ *     would have changed if they re-finalized.
+ *
+ * Failure here is logged but never blocks the finalize response —
+ * the user can still see the prompt and manually activate. That
+ * said, this should basically never fail because we already proved
+ * the schema is writable when saveFinalized() succeeded above.
+ */
+async function ensureAiConfigDraft(opts: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  userId: string;
+  sessionId: string;
+  existingAiConfigId: string | null;
+  extracted: ExtractedHearingData;
+  prompt: string;
+  sessionMode: AccountMode;
+  industry: string | null;
+}): Promise<{ aiConfigId: string | null }> {
+  const {
+    supabase,
+    userId,
+    sessionId,
+    existingAiConfigId,
+    extracted,
+    prompt,
+    sessionMode,
+    industry,
+  } = opts;
+
+  const sharedFields = {
+    account_mode: sessionMode,
+    industry: extracted.industry ?? industry ?? null,
+    business_name: extracted.business_name ?? null,
+    business_description: extracted.business_description ?? null,
+    persona_role: extracted.persona_role ?? null,
+    world_view: extracted.world_view ?? null,
+    voice_tone: extracted.voice_tone ?? null,
+    target_audience: extracted.target_audience ?? null,
+    ng_words: toStringArray(extracted.ng_words),
+    must_include_elements: toStringArray(extracted.must_include_elements),
+    good_examples: toStringArray(extracted.good_examples),
+    hashtag_pool: toStringArray(extracted.hashtag_pool),
+    generated_system_prompt: prompt,
+    business_hours: extracted.business_hours ?? null,
+    closed_days: extracted.closed_days ?? null,
+    address: extracted.address ?? null,
+    price_range: extracted.price_range ?? null,
+    menu_items: toStringArray(extracted.menu_items),
+    seasonal_items: toStringArray(extracted.seasonal_items),
+    real_episodes: toStringArray(extracted.real_episodes),
+    announcement_topics: toStringArray(extracted.announcement_topics),
+  };
+
+  // Existing row → UPDATE (refresh AI output, preserve activation + name).
+  if (existingAiConfigId) {
+    try {
+      const existing = await getAiConfigById(supabase, existingAiConfigId);
+      if (existing && existing.user_id === userId) {
+        const patch: AiConfigUpdate = sharedFields;
+        await updateAiConfig(supabase, existingAiConfigId, patch);
+        return { aiConfigId: existingAiConfigId };
+      }
+      // Row not found (deleted by user / RLS-hidden) — fall through to
+      // INSERT a fresh one. We'll re-link the session below.
+      console.warn(
+        "[finalize/draft] session.ai_config_id no longer resolves — re-creating",
+        { sessionId, existingAiConfigId },
+      );
+    } catch (e) {
+      console.warn("[finalize/draft] UPDATE path failed, will try INSERT", e);
+    }
+  }
+
+  const insert: AiConfigInsert = applyAiConfigDefaults({
+    user_id: userId,
+    name: extracted.business_name?.trim() || "新しいAI設定",
+    status: "draft",
+    ...sharedFields,
+  });
+  try {
+    const config = await createAiConfig(supabase, insert);
+    // Link the session so subsequent finalize calls UPDATE this row
+    // instead of inserting again.
+    await supabase
+      .from("ai_hearing_sessions")
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .update({ ai_config_id: config.id } as any)
+      .eq("id", sessionId);
+    return { aiConfigId: config.id };
+  } catch (e) {
+    console.error("[finalize/draft] INSERT failed — preview will still work but no draft saved", e);
+    return { aiConfigId: null };
+  }
+}
+
+/**
  * Build the absolute-minimum extracted data so a stuck session can still
  * complete. Used when both the streaming endpoint and the re-prompt
  * extraction failed (e.g. session 797b5c6e-...).
@@ -253,12 +373,26 @@ export async function POST(request: NextRequest, { params }: Ctx) {
 
   const sessionMode = normalizeAccountMode(session.account_mode);
 
-  // Already finalized — return cached.
+  // Already finalized — return cached. Even on the cached path we run
+  // ensureAiConfigDraft so sessions that were finalized BEFORE the
+  // 2026-05-23 auto-draft fix get their ai_config backfilled the
+  // first time the user revisits the preview page.
   if (session.extracted_data && session.generated_system_prompt) {
+    const { aiConfigId } = await ensureAiConfigDraft({
+      supabase,
+      userId: user.id,
+      sessionId,
+      existingAiConfigId: session.ai_config_id ?? null,
+      extracted: session.extracted_data,
+      prompt: session.generated_system_prompt,
+      sessionMode,
+      industry: session.industry,
+    });
     return NextResponse.json({
       extracted: session.extracted_data,
       prompt: session.generated_system_prompt,
       cached: true,
+      ai_config_id: aiConfigId,
     });
   }
 
@@ -292,10 +426,21 @@ export async function POST(request: NextRequest, { params }: Ctx) {
           { status: 500 },
         );
       }
+      const { aiConfigId } = await ensureAiConfigDraft({
+        supabase,
+        userId: user.id,
+        sessionId,
+        existingAiConfigId: session.ai_config_id ?? null,
+        extracted: normalized,
+        prompt,
+        sessionMode,
+        industry: session.industry,
+      });
       return NextResponse.json({
         extracted: normalized,
         prompt,
         source: "last_message",
+        ai_config_id: aiConfigId,
       });
     }
   }
@@ -430,9 +575,21 @@ JSONのみ。前置き・後置きは1行以内。`,
     );
   }
 
+  const { aiConfigId } = await ensureAiConfigDraft({
+    supabase,
+    userId: user.id,
+    sessionId,
+    existingAiConfigId: session.ai_config_id ?? null,
+    extracted: normalized,
+    prompt,
+    sessionMode,
+    industry: session.industry,
+  });
+
   return NextResponse.json({
     extracted: normalized,
     prompt,
     source: debugLog.finalResult === "skeleton" ? "skeleton" : "regenerated",
+    ai_config_id: aiConfigId,
   });
 }

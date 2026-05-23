@@ -290,7 +290,7 @@ export function PostCard({ post }: { post: PostListItem }) {
                     : "text-ink-subtle",
               ].join(" ")}
             >
-              ✏ {len} / {max} 重み（X計測）
+              ✏ {len} / {max}文字（X基準）
               {over && (
                 <span className="ml-2 font-sans">
                   ⚠ 上限超過 — 投稿時に末尾を切り詰めます

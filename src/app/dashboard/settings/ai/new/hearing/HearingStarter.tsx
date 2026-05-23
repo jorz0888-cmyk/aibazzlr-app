@@ -42,10 +42,19 @@ export function HearingStarter() {
         | {
             sessionId?: string;
             error?: string;
+            // 2026-05-23 T3: quota responses include a JP `message`
+            // alongside the legacy `error` code. Prefer the message
+            // when present so users don't see "daily_quota_exceeded".
+            message?: string;
             debug?: { code?: string | null; hint?: string | null };
           }
         | null;
       if (!res.ok) {
+        if (body?.message) {
+          // The server-provided JP copy already includes reset time +
+          // remediation; surface it verbatim.
+          throw new Error(body.message);
+        }
         const detail = body?.debug?.code
           ? ` (code: ${body.debug.code}${body.debug.hint ? ` / hint: ${body.debug.hint}` : ""})`
           : "";
@@ -128,7 +137,9 @@ export function HearingStarter() {
         ))}
       </div>
 
-      {error && <div className="err">{error}</div>}
+      {error && (
+        <div className="err whitespace-pre-line">{error}</div>
+      )}
 
       <div className="card flex items-center justify-between p-5">
         <div className="text-xs text-ink-muted">

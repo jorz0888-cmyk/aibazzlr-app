@@ -189,10 +189,36 @@ export async function GET(request: NextRequest) {
       onConflict: "user_id,platform,platform_account_id",
     });
   if (upsertErr) {
+    // 2026-05-23 T6: race fallthrough → same x_account_already_linked
+    // redirect the pre-check uses, so the OAuth 1.0a path doesn't get
+    // a different error UI than OAuth 2.0 for the same condition.
+    const code =
+      typeof (upsertErr as { code?: unknown }).code === "string"
+        ? ((upsertErr as { code?: string }).code ?? null)
+        : null;
+    const msg = upsertErr.message ?? "";
+    if (
+      code === "23505" &&
+      (msg.includes("social_accounts_active_platform_account_unique") ||
+        msg.includes("platform_account_id"))
+    ) {
+      console.warn(
+        "[oauth1/callback] race lost to global unique — converting to x_account_already_linked",
+        {
+          xUserId: access.userId,
+          xUsername: access.screenName,
+          userId: user.id,
+        },
+      );
+      return redirectWithParams(target, {
+        error: "x_account_already_linked",
+        detail: `@${access.screenName} は別の AIBazzlr アカウントで既に連携されています。元のアカウントで連携を解除してから再度お試しください。`,
+      });
+    }
     console.error("[oauth1/callback] upsert failed", upsertErr);
     return redirectWithParams(target, {
       error: "oauth1_save_failed",
-      detail: upsertErr.message.slice(0, 200),
+      detail: msg.slice(0, 200),
     });
   }
 

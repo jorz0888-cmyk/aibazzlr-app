@@ -2,7 +2,16 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { listAiConfigsByUser } from "@/lib/db/ai-configs";
 import { listActivePromptTemplates } from "@/lib/db/prompt-templates";
-import type { AiConfig, PromptTemplate } from "@/lib/supabase/types";
+import { listHearingSessionsByUser } from "@/lib/db/ai-hearing-sessions";
+import type {
+  AiConfig,
+  AiHearingSession,
+  PromptTemplate,
+} from "@/lib/supabase/types";
+import {
+  HearingSessionsSection,
+  type SessionRow,
+} from "./HearingSessionsSection";
 
 export const dynamic = "force-dynamic";
 
@@ -15,15 +24,29 @@ export default async function AiSettingsPage() {
 
   // Fetch in parallel; isolate failures so one query crash doesn't take the
   // whole page down.
-  const [configsRes, templatesRes] = await Promise.allSettled([
+  const [configsRes, templatesRes, sessionsRes] = await Promise.allSettled([
     listAiConfigsByUser(supabase, user.id),
     listActivePromptTemplates(supabase),
+    listHearingSessionsByUser(supabase, user.id),
   ]);
 
   const configs: AiConfig[] =
     configsRes.status === "fulfilled" ? configsRes.value : [];
   const templates: PromptTemplate[] =
     templatesRes.status === "fulfilled" ? templatesRes.value : [];
+  const sessionsRaw: AiHearingSession[] =
+    sessionsRes.status === "fulfilled" ? sessionsRes.value : [];
+
+  // Annotate each session with the status of the ai_config it links
+  // to (if any). HearingSessionsSection uses this to hide sessions
+  // whose config is already active in the main list.
+  const configById = new Map(configs.map((c) => [c.id, c]));
+  const sessions: SessionRow[] = sessionsRaw.map((s) => ({
+    ...s,
+    linkedConfigStatus: s.ai_config_id
+      ? (configById.get(s.ai_config_id)?.status ?? null)
+      : null,
+  }));
 
   const errors: string[] = [];
   if (configsRes.status === "rejected") {
@@ -32,6 +55,11 @@ export default async function AiSettingsPage() {
   if (templatesRes.status === "rejected") {
     errors.push(
       `プリセットの読み込みに失敗しました: ${describe(templatesRes.reason)}`,
+    );
+  }
+  if (sessionsRes.status === "rejected") {
+    errors.push(
+      `ヒアリング履歴の読み込みに失敗しました: ${describe(sessionsRes.reason)}`,
     );
   }
 
@@ -78,6 +106,8 @@ export default async function AiSettingsPage() {
           </ul>
         )}
       </section>
+
+      <HearingSessionsSection sessions={sessions} />
 
       {/* Industry presets */}
       <section className="space-y-4">
@@ -133,11 +163,18 @@ function ConfigCard({ config }: { config: AiConfig }) {
                 DEFAULT
               </span>
             )}
-            {config.status && (
+            {config.status === "draft" ? (
+              <span
+                className="rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 font-mono text-[9px] tracking-wider text-warning"
+                title="ヒアリングは完了していますが、まだ有効化されていません。詳細から有効化できます。"
+              >
+                下書き
+              </span>
+            ) : config.status && config.status !== "active" ? (
               <span className="rounded-full border border-line-strong bg-white/5 px-2 py-0.5 font-mono text-[9px] tracking-wider text-ink-muted">
                 {config.status.toUpperCase()}
               </span>
-            )}
+            ) : null}
           </div>
           <div className="mt-1 text-xs text-ink-muted">
             {subtitleParts.length > 0 ? subtitleParts.join(" · ") : "未設定"}

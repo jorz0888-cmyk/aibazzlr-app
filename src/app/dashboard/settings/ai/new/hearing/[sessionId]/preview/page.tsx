@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getHearingSession } from "@/lib/db/ai-hearing-sessions";
+import { getAiConfigById } from "@/lib/db/ai-configs";
 import { PromptPreview } from "@/components/hearing/PromptPreview";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +25,22 @@ export default async function HearingPreviewPage({
     redirect(`/dashboard/settings/ai/new/hearing/${sessionId}`);
   }
 
+  // 2026-05-23 T1: read the auto-saved draft so the preview can
+  // show the right activation state + a stable "後で有効化" link.
+  // If the session predates the auto-draft fix and has no
+  // ai_config_id yet, the next finalize call (triggered when the
+  // preview client calls the endpoint, or proactively below) will
+  // backfill it — for the first render we just show "未保存" UX.
+  const draft = session.ai_config_id
+    ? await getAiConfigById(supabase, session.ai_config_id)
+    : null;
+  const draftStatus: "draft" | "active" | null =
+    draft?.status === "active"
+      ? "active"
+      : draft
+        ? "draft"
+        : null;
+
   return (
     <div className="space-y-6">
       <div>
@@ -34,8 +51,8 @@ export default async function HearingPreviewPage({
           AIがあなたのお店を理解しました
         </h1>
         <p className="mt-2 max-w-2xl text-sm text-ink-muted">
-          ヒアリング内容をもとにシステムプロンプトを生成しました。内容を確認・編集して保存してください。
-          保存後はSNS投稿生成に利用できます。
+          ヒアリング内容をもとに AI設定を生成し、下書きとして自動保存しました。
+          内容を確認・編集して「この設定を有効化する」を押すと、投稿生成に使えるようになります。
         </p>
       </div>
 
@@ -43,6 +60,8 @@ export default async function HearingPreviewPage({
         sessionId={session.id}
         initialData={session.extracted_data}
         initialPrompt={session.generated_system_prompt}
+        draftStatus={draftStatus}
+        draftConfigId={draft?.id ?? null}
       />
     </div>
   );

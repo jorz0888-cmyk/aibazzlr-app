@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Spinner } from "@/components/Spinner";
 import { TestPostGenerator } from "./TestPostGenerator";
 import { toStringArray } from "@/lib/ai/normalize-extracted";
@@ -11,12 +11,18 @@ type Props = {
   sessionId: string;
   initialData: ExtractedHearingData;
   initialPrompt: string;
+  /** 2026-05-23 T1: the auto-saved draft's status, "draft" | "active". */
+  draftStatus: "draft" | "active" | null;
+  /** 2026-05-23 T1: id of the auto-saved draft, used by "後で有効化" link. */
+  draftConfigId: string | null;
 };
 
 export function PromptPreview({
   sessionId,
   initialData,
   initialPrompt,
+  draftStatus,
+  draftConfigId,
 }: Props) {
   const router = useRouter();
   const [name, setName] = useState(initialData.business_name ?? "");
@@ -104,6 +110,23 @@ export function PromptPreview({
 
   const mode = initialData.account_mode === "fictional" ? "fictional" : "real";
 
+  // 2026-05-23 T1: while the config is still a draft, warn on tab
+  // close / navigation away. The auto-save protects against losing
+  // the AI's structured output (we wrote it as a draft on finalize),
+  // but any hand-edits on this page or the unactivated state itself
+  // would otherwise leave silently.
+  useEffect(() => {
+    if (draftStatus !== "draft") return;
+    function handler(e: BeforeUnloadEvent) {
+      // Browsers ignore the message text — setting returnValue is
+      // what actually triggers the prompt on modern browsers.
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [draftStatus]);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-2">
@@ -116,7 +139,32 @@ export function PromptPreview({
             🎭 架空モード（v14スタイル）
           </span>
         )}
+        {draftStatus === "draft" && (
+          <span
+            className="inline-flex items-center gap-1.5 rounded-full border border-warning/30 bg-warning/10 px-3 py-1 font-mono text-[11px] tracking-widest text-warning"
+            title="この設定はすでに『下書き』として保存されています。投稿生成に使うには有効化してください。"
+          >
+            📝 下書き保存済み — 未有効化
+          </span>
+        )}
+        {draftStatus === "active" && (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-success/30 bg-success/10 px-3 py-1 font-mono text-[11px] tracking-widest text-success">
+            ✓ 有効化済み
+          </span>
+        )}
       </div>
+
+      {draftStatus === "draft" && (
+        <div className="card border-warning/30 bg-warning/5 p-4 text-xs leading-relaxed text-ink">
+          <p className="font-bold text-warning">
+            この設定は『下書き』として自動保存されています
+          </p>
+          <p className="mt-1 text-ink-muted">
+            ここで「この設定を有効化する」を押すと、投稿生成に使えるようになります。
+            ページを離れても下書きは AI設定一覧に残るので、後から続きを編集して有効化できます。
+          </p>
+        </div>
+      )}
 
       {initialData.summary_message && (
         <div className="card border-cyan/30 bg-cyan/5 p-5 text-sm leading-relaxed text-ink">
@@ -313,8 +361,9 @@ export function PromptPreview({
             onClick={() => router.push("/dashboard/settings/ai")}
             className="btn-secondary"
             disabled={saving}
+            title="下書きは自動保存済み。AI設定一覧から続きを編集できます。"
           >
-            キャンセル
+            {draftConfigId ? "後で有効化する" : "キャンセル"}
           </button>
           <button
             type="button"
@@ -322,7 +371,13 @@ export function PromptPreview({
             disabled={saving || !name.trim()}
             className="btn-primary"
           >
-            {saving ? <Spinner /> : "この内容で保存する →"}
+            {saving ? (
+              <Spinner />
+            ) : draftStatus === "active" ? (
+              "更新して保存する →"
+            ) : (
+              "この設定を有効化する →"
+            )}
           </button>
         </div>
       </div>

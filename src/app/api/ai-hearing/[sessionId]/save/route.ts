@@ -4,7 +4,12 @@ import {
   getHearingSession,
   updateHearingSession,
 } from "@/lib/db/ai-hearing-sessions";
-import { createAiConfig, setDefaultAiConfig } from "@/lib/db/ai-configs";
+import {
+  createAiConfig,
+  getAiConfigById,
+  setDefaultAiConfig,
+  updateAiConfig,
+} from "@/lib/db/ai-configs";
 import { applyAiConfigDefaults } from "@/lib/db/ai-config-defaults";
 import { extractDbError } from "@/lib/db/error";
 import {
@@ -14,8 +19,13 @@ import {
 import {
   normalizeAccountMode,
   type AiConfigInsert,
+  type AiConfigUpdate,
   type ExtractedHearingData,
 } from "@/lib/supabase/types";
+import {
+  aiConfigQuotaExceededResponse,
+  checkAiConfigQuota,
+} from "@/lib/quota";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -142,15 +152,76 @@ export async function POST(request: NextRequest, { params }: Ctx) {
         "Internal: insert.user_id is missing despite an authorized session",
       );
     }
-    const config = await createAiConfig(supabase, insert);
-    configId = config.id;
+
+    // 2026-05-23 T1: prefer to ACTIVATE the auto-saved draft instead
+    // of inserting a duplicate row. finalize creates one draft per
+    // session and links it via session.ai_config_id, so by the time
+    // the user clicks "有効化" there's almost always an existing row
+    // to flip.
+    const existingDraft =
+      session.ai_config_id
+        ? await getAiConfigById(supabase, session.ai_config_id)
+        : null;
+    const willActivate = existingDraft?.status !== "active";
+
+    // Quota enforced only on the active-flip — drafts are exempt
+    // (matches checkAiConfigQuota change in src/lib/quota.ts).
+    if (willActivate) {
+      const quota = await checkAiConfigQuota(userId);
+      if (!quota.allowed) {
+        return aiConfigQuotaExceededResponse(quota);
+      }
+    }
+
+    if (existingDraft && existingDraft.user_id === userId) {
+      // UPDATE the draft with the (possibly user-edited) data and flip
+      // it to active. We deliberately preserve fields the activate
+      // flow doesn't touch (posting_frequency / posting_times /
+      // social_account_ids / etc.) so any edits from the AI設定詳細
+      // page survive a re-activate.
+      const patch: AiConfigUpdate = {
+        name: insert.name,
+        account_mode: insert.account_mode,
+        industry: insert.industry,
+        business_name: insert.business_name,
+        business_description: insert.business_description,
+        persona_role: insert.persona_role,
+        world_view: insert.world_view,
+        voice_tone: insert.voice_tone,
+        target_audience: insert.target_audience,
+        ng_words: insert.ng_words,
+        must_include_elements: insert.must_include_elements,
+        good_examples: insert.good_examples,
+        bad_examples: insert.bad_examples,
+        hashtag_pool: insert.hashtag_pool,
+        generated_system_prompt: insert.generated_system_prompt,
+        business_hours: insert.business_hours,
+        closed_days: insert.closed_days,
+        address: insert.address,
+        price_range: insert.price_range,
+        menu_items: insert.menu_items,
+        seasonal_items: insert.seasonal_items,
+        real_episodes: insert.real_episodes,
+        announcement_topics: insert.announcement_topics,
+        status: "active",
+      };
+      await updateAiConfig(supabase, existingDraft.id, patch);
+      configId = existingDraft.id;
+    } else {
+      // No draft (e.g. session created before the auto-draft fix) →
+      // INSERT fresh. Force status='active' since this is an explicit
+      // user activation.
+      const insertForActivate: AiConfigInsert = { ...insert, status: "active" };
+      const config = await createAiConfig(supabase, insertForActivate);
+      configId = config.id;
+    }
 
     if (body.is_default) {
-      await setDefaultAiConfig(supabase, config.id, userId);
+      await setDefaultAiConfig(supabase, configId, userId);
     }
 
     await updateHearingSession(supabase, sessionId, {
-      ai_config_id: config.id,
+      ai_config_id: configId,
       status: "completed",
     });
   } catch (e) {
