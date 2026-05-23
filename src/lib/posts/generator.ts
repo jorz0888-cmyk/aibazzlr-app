@@ -39,16 +39,28 @@ const LANGUAGE_GUARD = `
 - 英単語は固有名詞・ブランド名・URL のみ許可`;
 
 function outputFormat(maxLen: number): string {
-  // Content budget = total cap minus a small reserve for hashtags + the
-  // "\n\n" + space separators that buildTweetText injects between them.
-  // The hard guarantee is total ≤ maxLen; this hint is just to steer the
-  // model so it doesn't bump up against the limit every time.
-  const contentBudget = Math.max(50, maxLen - 60);
-  // X uses a "weighted character" count: CJK / emoji / 全角句読点 = 2, ASCII /
-  // 半角 = 1, URL = 23 fixed. So a 140 weighted limit ≈ 70 Japanese chars
-  // (or ~140 ASCII chars). Teaching the model this explicitly keeps it
-  // from over-counting when retrying.
-  const jpCharBudget = Math.max(25, Math.floor(maxLen / 2) - 30);
+  // 2026-05-24 length-fix: Anthropic Haiku is bad at counting weighted
+  // characters internally, so the prompt has to do the math for it.
+  //
+  // X budget model:
+  //   - JP/CJK/emoji char = 2 weighted
+  //   - ASCII char        = 1 weighted
+  //   - separator "\n\n"  = 2 weighted (2 LFs)
+  //   - 1 space between tags = 1 weighted each
+  //   - URL               = 23 weighted fixed
+  //
+  // We carve out a 25-weighted-unit reserve for "hashtags + separators"
+  // (3 short JP-ish tags ≈ 16 weighted + space*2 = 18 + 2 LF = 20–25).
+  // What's left is content. Then we divide by 2 to get the JP-char
+  // ceiling because most of the body will be JP.
+  const reserveWeightForHashtagsAndSeparators = 25;
+  const contentWeightCeiling = Math.max(
+    30,
+    maxLen - reserveWeightForHashtagsAndSeparators,
+  );
+  // Divide by 2 → JP-char target. Subtract 5 more chars as a safety
+  // margin (LLM tends to over-shoot by ~10% on Japanese counting).
+  const jpCharTarget = Math.max(15, Math.floor(contentWeightCeiling / 2) - 5);
   return `
 
 【出力形式】
@@ -63,16 +75,17 @@ function outputFormat(maxLen: number): string {
 }
 \`\`\`
 
-【文字数制約（X基準・厳守）】
-- 投稿本文 + ハッシュタグ + 区切り文字 の **合計を ${maxLen}文字以内** に
-- X の数え方: 日本語などの全角は1文字を2としてカウント、半角英数は1文字を1としてカウント、URLは長さに関わらず23でカウント
-- 目安: 日本語中心なら content 約 ${jpCharBudget}文字以内（合計が ${contentBudget} 以内に収まるように）
-- 上限を超えた出力は無効とみなされ再生成されます
+【投稿の長さ制限（厳守 — これを破ると無効になります）】
+content（本文）は **日本語${jpCharTarget}文字以内**。長くしてはいけない。
+hashtags は **最大3つ・各タグ最大8文字**。
 
-【制約】
-- hashtagsは3-5個、なるべく自然な形で
-- 改行を効果的に使う
-- ハッシュタグは content には含めず、必ず hashtags 配列で返す
+なぜ短く：X は「日本語1文字 = 2文字、半角1文字 = 1文字、URL = 23文字」で
+合計を数え、このアカウントの上限は ${maxLen}文字。本文＋ハッシュタグ＋区切り
+を合算するため、上記の本数・字数を守る必要がある。
+
+【内容の制約】
+- 改行は最大2つまで。1〜3 文の短い投稿にする。
+- ハッシュタグは content には絶対に含めず、hashtags 配列だけに入れる。
 - topic_tags は snake_case の英小文字で 1〜3 個（例: morning_routine, menu_intro, weekday_promo）
 - strategic_intent は 1 行、誰がどんなタイミングで読むことを想定したかが分かる短い日本語`;
 }
@@ -377,16 +390,18 @@ export async function generatePostDraft(
   const attempts: string[] = [];
   const warnings: string[] = [];
 
-  // Phase 11.5 + 14: up to 2 attempts. On each attempt we validate the raw
-  // text for forbidden characters (language) AND compute the rendered tweet
-  // length against the AI config's max_post_length cap. Either failure
-  // triggers a retry with combined feedback. If both checks pass we break.
-  const MAX_ATTEMPTS = 2;
+  // 2026-05-24 length-fix: bump to 4 attempts (was 2). Real-world
+  // observation: Haiku often needs 2–3 retries to actually shorten a
+  // first-shot 200-char output down under the 140 cap, because the
+  // model treats the first hint as suggestive and the bar moves
+  // only after explicit miss feedback.
+  const MAX_ATTEMPTS = 4;
   const maxLen = aiConfig.max_post_length ?? 140;
   let resp;
   let text = "";
   let lastDetected: DetectedRun[] = [];
   let lastLengthOverrun: { actual: number; max: number } | null = null;
+  let lastDraftText: { content: string; hashtags: string[] } | null = null;
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     let userMessage = baseUser;
@@ -394,8 +409,33 @@ export async function generatePostDraft(
       if (lastDetected.length > 0) {
         userMessage += retryInstructionForDetection(lastDetected);
       }
-      if (lastLengthOverrun) {
-        userMessage += `\n\n【前回の出力エラー】\n前回の出力は合計 ${lastLengthOverrun.actual} 文字でした。上限 ${lastLengthOverrun.max} 文字を厳守してください（本文 + ハッシュタグ + 区切り文字を全て含む）。`;
+      if (lastLengthOverrun && lastDraftText) {
+        // 2026-05-24 length-fix: instead of a soft "stay under
+        // {max}" reminder, give the model
+        //   - the exact overshoot amount
+        //   - a concrete JP-char target (much tighter than the cap)
+        //   - the offending draft text so it can compress rather
+        //     than guess what it wrote
+        const over = lastLengthOverrun.actual - lastLengthOverrun.max;
+        // On each retry, ratchet the JP-char target down by ~20%
+        // until we leave headroom. attempt counts from 1 on retry.
+        const baseJpTarget = Math.max(
+          15,
+          Math.floor((lastLengthOverrun.max - 25) / 2) - 5,
+        );
+        const tightenedJpTarget = Math.max(
+          12,
+          baseJpTarget - attempt * 8,
+        );
+        userMessage += `\n\n【再生成 (前回 ${lastLengthOverrun.actual} / ${lastLengthOverrun.max} 文字 — ${over} 文字超過)】
+前回の content はこちら（短くするのが目的、JSON ではなく内容を見てください）：
+"""
+${lastDraftText.content}
+"""
+これを **日本語${tightenedJpTarget}文字以内** に圧縮した新しい content を返してください。
+要点を残し、情緒的な装飾・繰り返し・改行を削る。
+hashtags は最大3個、各タグ8文字以内。
+それでも長い場合は文を1つ削るのが正解。`;
       }
     }
 
@@ -452,6 +492,11 @@ export async function generatePostDraft(
     const tweetLen = computeTweetLength(previewContent, previewHashtags);
     lastLengthOverrun =
       tweetLen > maxLen ? { actual: tweetLen, max: maxLen } : null;
+    // 2026-05-24 length-fix: remember the actual draft body so the
+    // retry prompt can show it back to the model for compression.
+    lastDraftText = lastLengthOverrun
+      ? { content: previewContent, hashtags: previewHashtags }
+      : null;
     if (lastLengthOverrun) {
       console.warn("[generator] length check failed", {
         attempt,
