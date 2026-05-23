@@ -23,6 +23,94 @@ export class GeminiGenerationError extends Error {
 }
 
 /**
+ * 2026-05-24 image-style variants (per quality review).
+ *
+ * The previous version baked a single "warm natural lifestyle" style
+ * into every image (palette + composition + subject hint hardcoded
+ * at the bottom of the prompt, plus a fixed style=lifestyle-warm-
+ * natural tag in the description). All 8 pillars then produced the
+ * same beige-cafe-young-woman aesthetic — same tone forever.
+ *
+ * Now we keep 4 visually distinct presets and map each pillar
+ * deterministically to one via FNV-1a hash on pillar.id. Same
+ * pillar → same style every time (so a pillar feels consistent
+ * across its own posts), but the 8 pillars distribute across the 4
+ * presets and the feed gets visibly varied.
+ *
+ * Subject framing inside each preset deliberately avoids any single
+ * demographic default: "if a person appears, vary age/gender —
+ * never default to a young woman", and several presets prefer
+ * people-free still-life / hands-only / environmental shots.
+ *
+ * Hard rule (unchanged from earlier #A fix): every variant uses the
+ * SAME no-text instruction block at the top of the prompt. Style
+ * only swaps palette / composition / subject framing.
+ */
+const IMAGE_STYLE_VARIANTS = {
+  "warm-natural": {
+    palette:
+      "Warm earth tones, soft natural daylight from a window, beige / amber / honey accents",
+    composition:
+      "Candid lifestyle framing, slightly soft focus, intimate close-to-medium shot",
+    subjectHint:
+      "Cozy domestic, cafe, or sunlit-room setting. Strongly prefer still-life (a cup on a table, a notebook with a hand on it, an open window, indoor plants) over portraits. If a person does appear, vary age (could be 20s through 60s) and gender across images — explicitly do NOT default to a young woman.",
+  },
+  "clean-minimal": {
+    palette:
+      "White or light-grey background, soft shadows, a single accent color (could be muted blue, sage, or terracotta — vary across images)",
+    composition:
+      "Studio-style centered single subject or symmetric flat-lay, generous negative space, very sharp focus, no human figures",
+    subjectHint:
+      "A single object or small grouping on a clean surface — a folded notebook, a pen, a single fruit, a small ceramic dish, a smartphone face-down. No people at all. Quiet, almost editorial feel.",
+  },
+  "energetic-bright": {
+    palette:
+      "High saturation, bold mid-day daylight, contrasting accent colors (vary which color leads across images — could be vivid green, deep red, or saturated blue)",
+    composition:
+      "Dynamic angle (low-angle, Dutch tilt, or overhead 3/4), subtle motion blur in foreground or background, more visual energy",
+    subjectHint:
+      "Outdoor street or seasonal scene, vivid food shot, weather / sky element, a moment of action (rain on pavement, steam rising from a cup, leaves in motion). Avoid signage and neon since they tend to carry text. If a person appears, only show movement or back-of-head — never full face — and vary their attire and age.",
+  },
+  "professional-workspace": {
+    palette:
+      "Neutral cool tones, controlled even daylight, navy / slate / muted grey accents, occasional warm wood",
+    composition:
+      "Structured composition, sharp focus, slight overhead or 3/4-overhead angle, organized framing",
+    subjectHint:
+      "Workspace stillness — a closed laptop, an open notebook with a pen across it, a coffee mug, a small succulent on a desk. If a person appears, show only hands on a keyboard or pen — never a face. Vary the visible clothing (sweater / button-down / casual) across images so it doesn't read as the same person.",
+  },
+} as const;
+
+type ImageStyleKey = keyof typeof IMAGE_STYLE_VARIANTS;
+const IMAGE_STYLE_KEYS = Object.keys(
+  IMAGE_STYLE_VARIANTS,
+) as ImageStyleKey[];
+
+/**
+ * Deterministic mapping pillar.id → style. FNV-1a 32-bit hash mod 4
+ * gives a stable assignment that doesn't drift if a pillar's name
+ * is renamed (the id stays the same; see pillars.ts slugifyPillarName).
+ *
+ * If pillar is missing, we fall back to hashing the first topic tag
+ * or hashtag so different posts in the same config still get
+ * different styles. As a last resort we hash the literal "default"
+ * which always lands on the same variant — fine, it only affects
+ * the cold-start case where a config has no pillars and no topics.
+ */
+function styleKeyForPillar(
+  pillarId: string | null | undefined,
+  fallbackSeed: string,
+): ImageStyleKey {
+  const seed = (pillarId || fallbackSeed || "default").trim() || "default";
+  let h = 2166136261; // FNV offset basis
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return IMAGE_STYLE_KEYS[h % IMAGE_STYLE_KEYS.length];
+}
+
+/**
  * 2026-05-24 #A no-text-in-image fix.
  *
  * The previous version embedded the literal post body inside a
@@ -67,6 +155,14 @@ export function buildImagePromptFromPost(
     .filter(Boolean)
     .slice(0, 6);
 
+  // 2026-05-24 style-variants: pick palette / composition / subject
+  // framing based on pillar. NO-TEXT block below is unchanged.
+  const styleKey = styleKeyForPillar(
+    options.pillar?.id ?? null,
+    topicTags[0] ?? hashtags[0] ?? "default",
+  );
+  const style = IMAGE_STYLE_VARIANTS[styleKey];
+
   const parts: string[] = [];
 
   parts.push(
@@ -75,6 +171,7 @@ export function buildImagePromptFromPost(
 
   // (2) Hard no-text instructions FIRST, before any keyword that
   //     might be interpreted as something to write.
+  //     ↓ DO NOT REMOVE OR WEAKEN — text-glyph fix from earlier #A.
   parts.push(
     "## ABSOLUTE RULE — NO TEXT OR WRITING IN THE IMAGE",
     "The image MUST NOT contain ANY of the following: text, letters, words, characters, kanji, hiragana, katakana, numbers, captions, subtitles, watermarks, logos, brand marks, UI elements, labels, speech bubbles, signage, billboards, posters, menus, receipts, business cards, t-shirt prints, book covers, document text, screen text on phones or computers, blackboard writing, neon signs, or any other readable mark.",
@@ -89,12 +186,12 @@ export function buildImagePromptFromPost(
       "## Subject (interpret as visual concept, DO NOT render these words as text in the image)",
       semanticSubjects.join(", "),
     );
-  } else {
-    parts.push(
-      "## Subject",
-      "A warm everyday moment in a Japanese small business setting (cafe, workshop, atelier, salon, or workspace). No people facing the camera; environmental or hands-only shots preferred.",
-    );
   }
+
+  // Variant-specific subject framing. Always added (replaces the
+  // old hardcoded "warm everyday moment in a Japanese small
+  // business setting" default that was forcing a single aesthetic).
+  parts.push("## Subject framing", style.subjectHint);
 
   if (options.pillar) {
     parts.push(
@@ -105,7 +202,9 @@ export function buildImagePromptFromPost(
 
   // Anti-similarity hint. recentImageDescriptions are now short
   // English summaries per the generateAiImageForUser change below,
-  // so feeding them back doesn't re-inject JP text.
+  // so feeding them back doesn't re-inject JP text. The encoded
+  // style=<variant> token inside each past description also helps
+  // Gemini diverge from the previous style.
   const recent = (options.recentImageDescriptions ?? [])
     .map((s) => s.trim())
     .filter(Boolean)
@@ -118,9 +217,13 @@ export function buildImagePromptFromPost(
     );
   }
 
+  // Variant-specific style. Closes with a no-text reminder because
+  // it is the single most-violated constraint in our test runs.
   parts.push(
     "## Style",
-    "Natural lighting, warm color palette, shallow depth of field, candid framing. No text, no logos, no watermarks, no UI overlays — repeating the rule because it is the most important constraint.",
+    `Palette: ${style.palette}.`,
+    `Composition: ${style.composition}.`,
+    "No text, no logos, no watermarks, no UI overlays anywhere in the image — repeating the most important constraint.",
   );
 
   return parts.join("\n");
@@ -146,10 +249,19 @@ function buildAiImageDescription(opts: {
     .slice(0, 4)
     .join(", ");
   const pillar = opts.pillar?.name ?? "general";
+  // 2026-05-24 style-variants: encode the actual variant we used.
+  // The previous hard-coded "lifestyle-warm-natural" string here made
+  // every description claim the same style even when we varied — and
+  // also fed that single style label back into the next image's
+  // anti-similarity hint, reinforcing the monochrome look.
+  const styleKey = styleKeyForPillar(
+    opts.pillar?.id ?? null,
+    opts.topicTags[0] ?? opts.hashtags[0] ?? "default",
+  );
   const parts: string[] = [
     `pillar=${pillar}`,
     subjectKeys ? `subjects=${subjectKeys}` : "subjects=general",
-    "style=lifestyle-warm-natural",
+    `style=${styleKey}`,
   ];
   return parts.join(" / ").slice(0, 200);
 }
