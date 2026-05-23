@@ -19,6 +19,7 @@ import {
   normalizeAccountMode,
   type HearingMessage,
 } from "@/lib/supabase/types";
+import { ensureAiConfigFromHearing } from "@/lib/db/ai-config-from-hearing";
 
 export const runtime = "nodejs";
 // Allow long-running streamed responses (Claude completion + DB write +
@@ -208,6 +209,37 @@ export async function POST(request: NextRequest, { params }: Ctx) {
               status: "completed" as const,
               current_step: TOTAL_HEARING_STEPS,
             });
+          }
+
+          // 2026-05-23 T1 BUGFIX: previously the auto-draft logic was
+          // ONLY in /finalize, but this inline-completion path here in
+          // /message is the actual common entry point — Claude streams
+          // the final JSON on the last turn and we set status='completed'
+          // right above. The client then sees `completed === true` and
+          // redirects to the preview page WITHOUT POSTing /finalize, so
+          // the previous fix was bypassed. Calling the shared helper
+          // here closes that hole. Failure is logged, not thrown —
+          // status flip already happened so the user gets to preview.
+          try {
+            const { aiConfigId } = await ensureAiConfigFromHearing({
+              client: supabase,
+              userId: user.id,
+              sessionId,
+              existingAiConfigId: session.ai_config_id ?? null,
+              extracted: normalized,
+              prompt: generatedPrompt,
+              sessionMode,
+              industry: session.industry,
+            });
+            console.log(
+              "[hearing/message] auto-draft saved on inline completion",
+              { sessionId, aiConfigId },
+            );
+          } catch (e) {
+            console.error(
+              "[hearing/message] auto-draft creation failed (preview backfill should rescue)",
+              e,
+            );
           }
         } else {
           await updateHearingSession(supabase, sessionId, {

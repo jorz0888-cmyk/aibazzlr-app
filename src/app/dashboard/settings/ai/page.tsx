@@ -37,16 +37,18 @@ export default async function AiSettingsPage() {
   const sessionsRaw: AiHearingSession[] =
     sessionsRes.status === "fulfilled" ? sessionsRes.value : [];
 
-  // Annotate each session with the status of the ai_config it links
-  // to (if any). HearingSessionsSection uses this to hide sessions
-  // whose config is already active in the main list.
+  // Annotate each session with the status + name of the ai_config it
+  // links to (if any). HearingSessionsSection renders every session
+  // but switches the row's CTA + badge based on this state.
   const configById = new Map(configs.map((c) => [c.id, c]));
-  const sessions: SessionRow[] = sessionsRaw.map((s) => ({
-    ...s,
-    linkedConfigStatus: s.ai_config_id
-      ? (configById.get(s.ai_config_id)?.status ?? null)
-      : null,
-  }));
+  const sessions: SessionRow[] = sessionsRaw.map((s) => {
+    const linked = s.ai_config_id ? configById.get(s.ai_config_id) : null;
+    return {
+      ...s,
+      linkedConfigStatus: linked?.status ?? null,
+      linkedConfigName: linked?.name ?? null,
+    };
+  });
 
   const errors: string[] = [];
   if (configsRes.status === "rejected") {

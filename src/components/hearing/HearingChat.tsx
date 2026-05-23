@@ -261,16 +261,15 @@ export function HearingChat({ initial }: { initial: AiHearingSession }) {
         />
         <div className="flex items-center justify-between text-[11px] text-ink-subtle">
           <span>Enterで送信 · Shift+Enterで改行</span>
-          {currentStep >= 6 && !completed && finalizing !== "running" && (
-            <button
-              type="button"
-              onClick={manualFinalize}
-              disabled={sending}
-              className="text-ink-muted underline-offset-2 hover:text-cyan hover:underline disabled:opacity-50"
-            >
-              ここで終わりにする →
-            </button>
-          )}
+          {/*
+            2026-05-23 T1 BUGFIX: removed the "ここで終わりにする →"
+            mid-hearing link that previously appeared at step 6+. The
+            T1 spec is explicit: "ヒアリングの質問の途中で保存 UI は
+            一切出さない". The auto-completion in /message + the
+            step-10 FinalizeBanner already cover the legitimate
+            completion paths; this early link only encouraged half-
+            done activations.
+          */}
         </div>
       </div>
     </div>
