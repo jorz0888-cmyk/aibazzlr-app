@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient, createClient } from "@/lib/supabase/server";
 import { encryptToken, decryptToken } from "@/lib/oauth/encryption";
 import {
   XOauth1Error,
@@ -102,6 +102,35 @@ export async function GET(request: NextRequest) {
           : e instanceof Error
             ? e.message.slice(0, 200)
             : "unknown",
+    });
+  }
+
+  // Phase 18 cross-user check (mirrors the OAuth 2.0 callback). The
+  // partial unique index would reject the upsert with 23505 anyway,
+  // but a pre-check lets us return a clear JP message instead of a
+  // generic "save_failed" and skip the (expensive) token encryption.
+  const admin = createAdminClient();
+  const { data: cross } = await admin
+    .from("social_accounts")
+    .select("id, user_id, username")
+    .eq("platform", "x")
+    .eq("platform_account_id", access.userId)
+    .eq("status", "active")
+    .neq("user_id", user.id)
+    .limit(1);
+  if (cross && cross.length > 0) {
+    console.warn(
+      "[oauth1/callback] rejected — X account already linked by another AIBazzlr user",
+      {
+        xUserId: access.userId,
+        xUsername: access.screenName,
+        attemptingUser: user.id,
+        ownerUser: cross[0].user_id,
+      },
+    );
+    return redirectWithParams(target, {
+      error: "x_account_already_linked",
+      detail: `@${access.screenName} は別の AIBazzlr アカウントで既に連携されています。元のアカウントで連携を解除してから再度お試しください。`,
     });
   }
 

@@ -12,6 +12,11 @@ const ERROR_LABELS: Record<string, string> = {
   session_lookup_failed: "セッション検証中にエラーが発生しました",
   server_misconfigured: "サーバ設定（環境変数）が不足しています",
   access_denied: "X側で認可がキャンセルされました",
+  // Phase 18: the same X account was already linked from another
+  // AIBazzlr user. The callback supplies a `detail` line that names
+  // the X handle and tells the visitor what to do next.
+  x_account_already_linked: "この X アカウントは別の AIBazzlr アカウントで連携中です",
+  oauth1_save_failed: "OAuth 1.0a の保存に失敗しました",
 };
 
 export function SnsToast() {

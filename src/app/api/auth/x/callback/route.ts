@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient, createClient } from "@/lib/supabase/server";
 import {
   deleteOauthSession,
   getOauthSessionByState,
@@ -94,6 +94,38 @@ export async function GET(request: NextRequest) {
       ? encryptToken(tokenResponse.refresh_token)
       : null;
     const expiresAt = new Date(Date.now() + tokenResponse.expires_in * 1000);
+
+    // 4.5 Phase 18: cross-user check. The partial unique index
+    //     social_accounts_active_platform_account_unique would reject
+    //     this insert with a 23505 anyway, but raw errors leave the
+    //     user on a generic "save_failed" screen. We pre-check with
+    //     the admin client (RLS would hide other users' rows) so we
+    //     can return a clean JP message and exit before encrypting
+    //     anything we won't use.
+    const admin = createAdminClient();
+    const { data: cross } = await admin
+      .from("social_accounts")
+      .select("id, user_id, username")
+      .eq("platform", "x")
+      .eq("platform_account_id", xUser.id)
+      .eq("status", "active")
+      .neq("user_id", user.id)
+      .limit(1);
+    if (cross && cross.length > 0) {
+      console.warn(
+        "[X-OAUTH-CALLBACK] rejected — X account already linked by another AIBazzlr user",
+        {
+          xUserId: xUser.id,
+          xUsername: xUser.username,
+          attemptingUser: user.id,
+          ownerUser: cross[0].user_id,
+        },
+      );
+      return redirectWithParams(target, {
+        error: "x_account_already_linked",
+        detail: `@${xUser.username} は別の AIBazzlr アカウントで既に連携されています。元のアカウントで連携を解除してから再度お試しください。`,
+      });
+    }
 
     // 5. Decide is_primary: only the FIRST active account for this
     // (user, platform) becomes primary. Re-connecting an existing account
