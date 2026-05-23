@@ -52,7 +52,14 @@ export function ChatInput({
         rows={1}
         placeholder={placeholder}
         disabled={disabled}
-        className="flex-1 resize-none bg-transparent px-3 py-2 text-sm text-ink placeholder-ink-subtle outline-none disabled:opacity-50"
+        // 2026-05-23: text-base on mobile (16px) prevents the iOS
+        // Safari auto-zoom that fires whenever a focused form
+        // control's computed font-size is under 16px. We keep
+        // text-sm on desktop where the smaller size looks better.
+        // The same rule is applied globally in globals.css for any
+        // other form control that gets missed; this inline copy is
+        // the per-component safety belt.
+        className="flex-1 resize-none bg-transparent px-3 py-2 text-base sm:text-sm text-ink placeholder-ink-subtle outline-none disabled:opacity-50"
       />
       <button
         type="submit"

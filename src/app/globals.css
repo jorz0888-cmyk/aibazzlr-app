@@ -59,3 +59,41 @@
     radial-gradient(1000px 500px at 10% -10%, rgba(0, 217, 255, 0.08), transparent 60%),
     radial-gradient(800px 400px at 90% 10%, rgba(127, 119, 221, 0.08), transparent 60%);
 }
+
+/*
+ * 2026-05-23: prevent iOS Safari auto-zoom on form focus.
+ *
+ * iOS Safari auto-zooms the viewport whenever a focused input /
+ * textarea / select has a computed font-size below 16px. Most of
+ * our form controls use Tailwind's text-sm (14px), which triggers
+ * the zoom and leaves the user needing to pinch back out every
+ * time. We lift to 16px on touch-sized viewports — only there,
+ * so desktop keeps the tighter 14px treatment.
+ *
+ * Why this approach and not user-scalable=no:
+ *   - disabling user zoom hurts low-vision users (WCAG 1.4.4).
+ *   - 16px font-size kills auto-zoom but keeps pinch-zoom intact.
+ *
+ * Why max-width:640px and not (pointer:coarse):
+ *   - iPads with attached keyboards register as fine pointer but
+ *     still have the same auto-zoom behavior on touch focus. The
+ *     viewport-based query is more reliable for "phone-shaped"
+ *     screens, which is where the symptom matters.
+ */
+@media (max-width: 640px) {
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input[type="search"],
+  input[type="url"],
+  input[type="tel"],
+  input[type="date"],
+  input[type="datetime-local"],
+  input[type="time"],
+  input:not([type]),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
