@@ -99,7 +99,16 @@ export default async function AiSettingsPage() {
         </div>
 
         {configs.length === 0 ? (
-          <EmptyConfig />
+          // 2026-05-23 bug-4 defensive: if the user has any hearing
+          // session with extracted_data (i.e. they DID complete a
+          // hearing) but no ai_configs row, something went wrong in
+          // the auto-save path. Tell them — don't show the "ようこそ
+          // 始めましょう" empty state that hides the actual problem.
+          sessionsRaw.some((s) => s.extracted_data != null) ? (
+            <DraftLostHint />
+          ) : (
+            <EmptyConfig />
+          )
         ) : (
           <ul className="grid gap-3">
             {configs.map((c) => (
@@ -292,6 +301,28 @@ function EmptyConfig() {
       <Link href="/dashboard/settings/ai/new" className="btn-primary mt-5">
         最初のAI設定を作成
       </Link>
+    </div>
+  );
+}
+
+function DraftLostHint() {
+  return (
+    <div className="card grid place-items-center border-warning/30 bg-warning/5 px-6 py-10 text-center">
+      <div className="text-3xl">📝</div>
+      <h3 className="mt-3 text-sm font-bold text-warning">
+        ヒアリングは完了していますが、AI設定が一覧に出ていません
+      </h3>
+      <p className="mt-1 max-w-md text-xs text-ink-muted">
+        下の「ヒアリング履歴」から該当セッションを開いて、内容の確認・有効化を
+        お願いします。それでも保存できない場合は{" "}
+        <a
+          href="mailto:support@aibazzlr.com"
+          className="text-cyan underline-offset-2 hover:underline"
+        >
+          support@aibazzlr.com
+        </a>{" "}
+        までご連絡ください。
+      </p>
     </div>
   );
 }

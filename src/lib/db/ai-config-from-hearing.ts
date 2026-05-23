@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { revalidatePath } from "next/cache";
 import {
   createAiConfig,
   getAiConfigById,
@@ -99,6 +100,14 @@ export async function ensureAiConfigFromHearing(opts: {
         //   - name  (preserve any rename the user made on the detail page)
         const patch: AiConfigUpdate = sharedFields;
         await updateAiConfig(client, existingAiConfigId, patch);
+        // 2026-05-23 bug-4 fix: invalidate the AI設定 list cache so a
+        // subsequent navigation surfaces the refreshed draft. Without
+        // this the Next.js router cache could keep the user on a
+        // pre-write rendering of /dashboard/settings/ai (an exact
+        // repro of the c7917023 ghost-empty-list report — DB had the
+        // draft, but client-cached HTML didn't).
+        revalidatePath("/dashboard/settings/ai");
+        revalidatePath(`/dashboard/settings/ai/${existingAiConfigId}`);
         return { aiConfigId: existingAiConfigId, error: null };
       }
       console.warn(
@@ -126,6 +135,9 @@ export async function ensureAiConfigFromHearing(opts: {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .update({ ai_config_id: config.id } as any)
       .eq("id", sessionId);
+    // Same router-cache invalidation as the UPDATE path.
+    revalidatePath("/dashboard/settings/ai");
+    revalidatePath(`/dashboard/settings/ai/${config.id}`);
     return { aiConfigId: config.id, error: null };
   } catch (e) {
     // 2026-05-23 3rd-attempt fix: extract the actual Postgres error

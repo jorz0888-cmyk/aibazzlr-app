@@ -15,6 +15,7 @@ import { MediaLibrarySection } from "./MediaLibrarySection";
 import { MarketingStrategySection } from "./MarketingStrategySection";
 import { MaxPostLengthEditor } from "./MaxPostLengthEditor";
 import { ContentPillarsSection } from "./ContentPillarsSection";
+import { ActivateDraftBanner } from "./ActivateDraftBanner";
 
 export const dynamic = "force-dynamic";
 
@@ -80,11 +81,15 @@ export default async function ConfigDetailPage({
                 DEFAULT
               </span>
             )}
-            {config.status && (
+            {config.status === "draft" ? (
+              <span className="rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 font-mono text-[10px] tracking-widest text-warning">
+                下書き
+              </span>
+            ) : config.status && config.status !== "active" ? (
               <span className="rounded-full border border-line-strong bg-white/5 px-2 py-0.5 font-mono text-[10px] tracking-widest text-ink-muted">
                 {config.status.toUpperCase()}
               </span>
-            )}
+            ) : null}
           </h1>
           <p className="mt-1 text-sm text-ink-muted">
             {config.industry ?? "業種未設定"}
@@ -97,6 +102,10 @@ export default async function ConfigDetailPage({
           isDefault={config.is_default}
         />
       </div>
+
+      {config.status === "draft" && (
+        <ActivateDraftBanner configId={config.id} />
+      )}
 
       <Card title="基本情報">
         <EditableText

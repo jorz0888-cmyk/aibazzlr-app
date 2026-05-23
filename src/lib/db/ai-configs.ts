@@ -18,6 +18,11 @@ export async function listAiConfigsByUser(
   userId: string,
   options: ListAiConfigsOptions = {},
 ): Promise<AiConfig[]> {
+  // 2026-05-23 bug-4: NO status filter here on purpose. Drafts must
+  // appear in the AI設定 list alongside active configs (the badge
+  // rendering separates them). If a regression ever adds .eq('status',
+  // 'active') here, drafts vanish from the UI even though they're in
+  // the DB — exactly the symptom user c7917023 hit.
   let query = supabase
     .from(TABLE)
     .select("*")
