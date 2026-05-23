@@ -39,6 +39,12 @@ type Client = SupabaseClient<Database>;
  * subsequent calls UPDATE the same row, preserving the activated
  * status and any user edits made in the AI設定詳細 page.
  */
+export type EnsureAiConfigResult = {
+  aiConfigId: string | null;
+  /** Non-null when something blocked the write — caller surfaces. */
+  error: { code: string | null; message: string } | null;
+};
+
 export async function ensureAiConfigFromHearing(opts: {
   client: Client;
   userId: string;
@@ -48,7 +54,7 @@ export async function ensureAiConfigFromHearing(opts: {
   prompt: string;
   sessionMode: AccountMode;
   industry: string | null;
-}): Promise<{ aiConfigId: string | null }> {
+}): Promise<EnsureAiConfigResult> {
   const {
     client,
     userId,
@@ -93,7 +99,7 @@ export async function ensureAiConfigFromHearing(opts: {
         //   - name  (preserve any rename the user made on the detail page)
         const patch: AiConfigUpdate = sharedFields;
         await updateAiConfig(client, existingAiConfigId, patch);
-        return { aiConfigId: existingAiConfigId };
+        return { aiConfigId: existingAiConfigId, error: null };
       }
       console.warn(
         "[ai-config-from-hearing] session.ai_config_id missing — re-creating",
@@ -120,12 +126,29 @@ export async function ensureAiConfigFromHearing(opts: {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .update({ ai_config_id: config.id } as any)
       .eq("id", sessionId);
-    return { aiConfigId: config.id };
+    return { aiConfigId: config.id, error: null };
   } catch (e) {
+    // 2026-05-23 3rd-attempt fix: extract the actual Postgres error
+    // (code + message) and SURFACE it to the caller instead of
+    // silently returning null. The previous "swallow + return null"
+    // pattern is exactly what hid the 23514 CHECK-constraint
+    // violation that broke auto-save for ~2 weeks — the helper
+    // logged loudly, but no caller wired the failure into the UI,
+    // so users saw a green "保存しました" while the DB had no row.
+    const code =
+      typeof (e as { code?: unknown }).code === "string"
+        ? ((e as { code?: string }).code ?? null)
+        : null;
+    const message =
+      e instanceof Error
+        ? e.message
+        : typeof (e as { message?: unknown }).message === "string"
+          ? (e as { message: string }).message
+          : "詳細不明のエラー";
     console.error(
       "[ai-config-from-hearing] INSERT failed — no draft saved",
-      e,
+      { code, message, sessionId, userId },
     );
-    return { aiConfigId: null };
+    return { aiConfigId: null, error: { code, message } };
   }
 }
