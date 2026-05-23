@@ -43,8 +43,13 @@ export function ManualForm({ mode, initial }: Props) {
   const [hashtagPool, setHashtagPool] = useState<string[]>(
     initial?.hashtag_pool ?? [],
   );
+  // 2026-05-23 manual-form fix: posting_frequency is a DB enum
+  // (daily / twice_daily / weekdays / custom). The earlier free-text
+  // input let users type "毎日 8:00 / 19:00" matching the placeholder
+  // hint, which always tripped ai_configs_posting_frequency_check
+  // (23514) and broke creation. Now it's a select bound to the enum.
   const [postingFrequency, setPostingFrequency] = useState(
-    initial?.posting_frequency ?? "",
+    initial?.posting_frequency ?? "daily",
   );
   const [isDefault, setIsDefault] = useState(initial?.is_default ?? false);
 
@@ -108,8 +113,18 @@ export function ManualForm({ mode, initial }: Props) {
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error ?? `HTTP ${res.status}`);
+        // 2026-05-23 manual-form fix: surface the real DB error
+        // (Postgres code + message) instead of the generic 500
+        // wrapper. The earlier "AI設定の作成に失敗しました" alone
+        // hid the actual constraint violation (e.g. 23514 on
+        // posting_frequency) so users had no recovery path.
+        const err = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          debug?: { code?: string | null; message?: string | null };
+        };
+        const code = err.debug?.code ? `[${err.debug.code}] ` : "";
+        const detail = err.debug?.message ?? err.error ?? `HTTP ${res.status}`;
+        throw new Error(`${code}${detail}`);
       }
       const { id } = (await res.json()) as { id: string };
       router.push(`/dashboard/settings/ai/${id}`);
@@ -282,13 +297,20 @@ export function ManualForm({ mode, initial }: Props) {
           />
         </Field>
 
-        <Field label="投稿頻度・時間帯" hint="例：毎日 8:00 / 19:00">
-          <input
-            type="text"
+        <Field
+          label="投稿頻度"
+          hint="具体的な時刻は作成後に「自動投稿スケジュール」で設定します"
+        >
+          <select
             value={postingFrequency}
             onChange={(e) => setPostingFrequency(e.target.value)}
             className="input"
-          />
+          >
+            <option value="daily">毎日</option>
+            <option value="twice_daily">1日2回</option>
+            <option value="weekdays">平日のみ</option>
+            <option value="custom">カスタム</option>
+          </select>
         </Field>
       </Section>
 

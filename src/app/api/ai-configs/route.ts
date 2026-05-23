@@ -1,9 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { createAiConfig, setDefaultAiConfig } from "@/lib/db/ai-configs";
+import {
+  createAiConfig,
+  setDefaultAiConfig,
+  updateAiConfig,
+} from "@/lib/db/ai-configs";
 import { applyAiConfigDefaults } from "@/lib/db/ai-config-defaults";
 import { extractDbError } from "@/lib/db/error";
 import { toStringArray } from "@/lib/ai/normalize-extracted";
+import { generateContentPillars } from "@/lib/posts/pillars";
 import type { AiConfigInsert } from "@/lib/supabase/types";
 import {
   checkAiConfigQuota,
@@ -81,6 +87,35 @@ export async function POST(request: NextRequest) {
     if (body.is_default) {
       await setDefaultAiConfig(supabase, config.id, user.id);
     }
+
+    // 2026-05-23: manual configs have no pillar field in the form, so
+    // the content_pillars JSONB stays at the DB default ('[]') unless
+    // we generate one. Without pillars the diversity engine cold-
+    // starts uniform-random over an empty pool → effectively no
+    // diversity rotation. Run pillar generation best-effort; if it
+    // fails (LLM error / no API key), the row still exists and the
+    // next post-generate call's lazy-mint inside buildGenerateContext
+    // will retry.
+    try {
+      const pillars = await generateContentPillars(config);
+      if (pillars.length > 0) {
+        await updateAiConfig(supabase, config.id, {
+          content_pillars: pillars,
+        });
+        console.log("[ai-configs POST] minted pillars for manual config", {
+          configId: config.id,
+          count: pillars.length,
+        });
+      }
+    } catch (pillarErr) {
+      console.warn(
+        "[ai-configs POST] pillar generation failed for manual config (will retry on first post)",
+        { configId: config.id, error: pillarErr },
+      );
+    }
+
+    revalidatePath("/dashboard/settings/ai");
+    revalidatePath(`/dashboard/settings/ai/${config.id}`);
     return NextResponse.json({ id: config.id });
   } catch (e) {
     const info = extractDbError(e);
