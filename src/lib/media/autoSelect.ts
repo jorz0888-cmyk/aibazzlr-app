@@ -7,6 +7,7 @@ import type {
 } from "@/lib/supabase/types";
 import { selectFromLibrary } from "./selector";
 import {
+  buildAiImageDescription,
   buildImagePromptFromPost,
   generateAiImageForUser,
   GeminiGenerationError,
@@ -523,10 +524,24 @@ async function tryGeminiGenerate(opts: {
     pillar,
     recentImageDescriptions: recentDescriptions,
   });
+  // 2026-05-24 #A: store a SHORT, JP-free description so the next
+  // anti-similarity hint we feed back doesn't recycle JP body text
+  // into the prompt.
+  const shortDescription = buildAiImageDescription({
+    topicTags,
+    hashtags,
+    pillar,
+  });
 
   let media: MediaLibraryRow;
   try {
-    media = await generateAiImageForUser(client, userId, aiConfigId, prompt);
+    media = await generateAiImageForUser(
+      client,
+      userId,
+      aiConfigId,
+      prompt,
+      shortDescription,
+    );
   } catch (e) {
     if (e instanceof GeminiGenerationError) {
       console.error("[media/autoSelect] Gemini FAILED", {

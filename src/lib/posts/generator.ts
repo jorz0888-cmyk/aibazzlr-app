@@ -49,18 +49,20 @@ function outputFormat(maxLen: number): string {
   //   - 1 space between tags = 1 weighted each
   //   - URL               = 23 weighted fixed
   //
-  // We carve out a 25-weighted-unit reserve for "hashtags + separators"
-  // (3 short JP-ish tags ≈ 16 weighted + space*2 = 18 + 2 LF = 20–25).
-  // What's left is content. Then we divide by 2 to get the JP-char
-  // ceiling because most of the body will be JP.
-  const reserveWeightForHashtagsAndSeparators = 25;
-  const contentWeightCeiling = Math.max(
-    30,
-    maxLen - reserveWeightForHashtagsAndSeparators,
-  );
-  // Divide by 2 → JP-char target. Subtract 5 more chars as a safety
-  // margin (LLM tends to over-shoot by ~10% on Japanese counting).
-  const jpCharTarget = Math.max(15, Math.floor(contentWeightCeiling / 2) - 5);
+  // 2026-05-24 #B: previous target was the "safe under-cap" math:
+  //   contentBudgetWeighted = maxLen - 25     (= 115 at maxLen=140)
+  //   jpCharTarget          = floor(/2) - 5   (= 52 at maxLen=140)
+  // Haiku tends to under-shoot its target by ~30%, so at target=52
+  // it landed at ~37-47 JP chars → 100-118 weighted total (well
+  // under cap but thin). The user spec calls those drafts 淡白.
+  //
+  // New: aim for ~70% of maxLen as JP-char target. This intentionally
+  // OVERSHOOTS the X weighted ceiling on the first attempt (e.g. at
+  // maxLen=140 → target ~98 chars → ~200 weighted → over). The
+  // existing post-generation validation + retry ratchet (NOT changed,
+  // per spec) brings it back under. Net result: drafts land near the
+  // cap with real content weight instead of bouncing low.
+  const jpCharTarget = Math.max(40, Math.floor(maxLen * 0.7));
   return `
 
 【出力形式】
@@ -84,7 +86,7 @@ hashtags は **最大3つ・各タグ最大8文字**。
 を合算するため、上記の本数・字数を守る必要がある。
 
 【内容の制約】
-- 改行は最大2つまで。1〜3 文の短い投稿にする。
+- 改行は最大2つまで。${jpCharTarget}文字に到達するくらい中身を入れる（薄い1文だけで終わらせない）。
 - ハッシュタグは content には絶対に含めず、hashtags 配列だけに入れる。
 - topic_tags は snake_case の英小文字で 1〜3 個（例: morning_routine, menu_intro, weekday_promo）
 - strategic_intent は 1 行、誰がどんなタイミングで読むことを想定したかが分かる短い日本語`;

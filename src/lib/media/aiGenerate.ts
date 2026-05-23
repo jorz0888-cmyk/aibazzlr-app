@@ -23,68 +23,135 @@ export class GeminiGenerationError extends Error {
 }
 
 /**
- * Synthesize a Gemini prompt that produces an SNS-appropriate photo
- * for a Japanese small-business post. We avoid embedding the literal
- * Japanese sentence (Gemini's text-in-image rendering is unreliable
- * and the user almost never wants a screenshot of their caption);
- * instead we lean on the topic tags + a stylistic frame.
+ * 2026-05-24 #A no-text-in-image fix.
+ *
+ * The previous version embedded the literal post body inside a
+ * `Mood / caption context: "<JP text>"` line. Gemini reliably
+ * interpreted the quoted JP text as "draw this caption" and produced
+ * images with garbled kanji/hiragana baked in ("剽間です！" /
+ * "SNS溍用" / etc.) — fatal for a SaaS shipping public X posts.
+ *
+ * The fix has 3 parts:
+ *   1. The literal post body never enters the prompt. Topic tags +
+ *      pillar concept words carry the semantic load; the body itself
+ *      stays in the post caption where it belongs.
+ *   2. A loud, structured "ABSOLUTE RULE — NO TEXT" block at the top
+ *      of the prompt, listing every kind of writable surface to
+ *      suppress (signs, screens, packaging, clothing, menus, etc.).
+ *   3. Any JP keywords that DO have to appear (pillar name,
+ *      hashtag-derived subject) are wrapped with "interpret as
+ *      meaning, do NOT render as text in the image" so the model
+ *      doesn't read them as transcription targets.
+ *
+ * `content` is still accepted in the signature for back-compat with
+ * existing callers (and so a future change can use it as a private
+ * input to a translation step) but it is NOT used in the returned
+ * prompt — see explicit `void content` below.
  */
 export function buildImagePromptFromPost(
   content: string,
   topicTags: string[],
   hashtags: string[],
   options: {
-    /** Phase 17: the pillar the post was generated for. */
     pillar?: ContentPillar | null;
-    /** Phase 17: ai_description / prompt of the last N images this
-     *  config attached. Passed to Gemini as "explicitly do not look
-     *  like these" so visually identical loops break. */
+    /** Short, English-only concept summaries of recent images. See
+     *  generateAiImageForUser for the new shape — we no longer feed
+     *  back the full prompt (it used to re-inject the JP body). */
     recentImageDescriptions?: string[];
   } = {},
 ): string {
-  const topics = [...topicTags, ...hashtags]
+  void content; // intentionally unused — see jsdoc
+
+  const semanticSubjects = [...topicTags, ...hashtags]
     .map((t) => t.replace(/^#+/, "").trim())
     .filter(Boolean)
     .slice(0, 6);
-  const topicLine =
-    topics.length > 0
-      ? `Subject / scene: ${topics.join(", ")}.`
-      : "Subject / scene: a warm everyday moment hinted at by the caption.";
-  const snippet = content.slice(0, 140).replace(/\s+/g, " ");
-  const parts: string[] = [
-    "Photorealistic 4:5 lifestyle photo suitable for a Japanese small-business social post.",
-    topicLine,
-  ];
-  // Phase 17: pillar adds an angle hint Gemini can interpret as
-  // composition / framing direction. Kept short so it doesn't dwarf
-  // the content-derived signal.
-  if (options.pillar) {
+
+  const parts: string[] = [];
+
+  parts.push(
+    "Generate a single photorealistic 4:5 vertical lifestyle photograph suitable for a Japanese small-business social post.",
+  );
+
+  // (2) Hard no-text instructions FIRST, before any keyword that
+  //     might be interpreted as something to write.
+  parts.push(
+    "## ABSOLUTE RULE — NO TEXT OR WRITING IN THE IMAGE",
+    "The image MUST NOT contain ANY of the following: text, letters, words, characters, kanji, hiragana, katakana, numbers, captions, subtitles, watermarks, logos, brand marks, UI elements, labels, speech bubbles, signage, billboards, posters, menus, receipts, business cards, t-shirt prints, book covers, document text, screen text on phones or computers, blackboard writing, neon signs, or any other readable mark.",
+    "Every surface that could carry writing (signs, screens, posters, packaging, clothing, papers) must be blank, abstract, decorative, or out of focus.",
+    "If you are uncertain whether something might be read as text, leave it out entirely. Wordless, text-free image.",
+  );
+
+  // (3) Semantic subject — wrap so the model treats keywords as
+  //     concepts, not transcription targets.
+  if (semanticSubjects.length > 0) {
     parts.push(
-      `Angle: ${options.pillar.name} — ${options.pillar.description}.`,
+      "## Subject (interpret as visual concept, DO NOT render these words as text in the image)",
+      semanticSubjects.join(", "),
+    );
+  } else {
+    parts.push(
+      "## Subject",
+      "A warm everyday moment in a Japanese small business setting (cafe, workshop, atelier, salon, or workspace). No people facing the camera; environmental or hands-only shots preferred.",
     );
   }
-  parts.push(
-    `Mood / caption context (do NOT render any text or watermark in the image): "${snippet}".`,
-  );
-  // Phase 17: anti-similarity hint. Surface the most-recent images'
-  // descriptions and tell Gemini to differ. Trimmed so the prompt
-  // stays under model attention limits.
+
+  if (options.pillar) {
+    parts.push(
+      "## Angle (interpret as composition direction, DO NOT render the words)",
+      `${options.pillar.name}: ${options.pillar.description}`,
+    );
+  }
+
+  // Anti-similarity hint. recentImageDescriptions are now short
+  // English summaries per the generateAiImageForUser change below,
+  // so feeding them back doesn't re-inject JP text.
   const recent = (options.recentImageDescriptions ?? [])
     .map((s) => s.trim())
     .filter(Boolean)
     .slice(0, 5);
   if (recent.length > 0) {
-    const list = recent
-      .map((d, i) => `(${i + 1}) ${d.slice(0, 120)}`)
-      .join(" | ");
     parts.push(
-      `Recent images for this account were: ${list}. The new image must be visually distinct — different subject, composition, color palette, or framing.`,
+      "## Past visual themes for this account (do NOT render these as text either)",
+      recent.map((d, i) => `(${i + 1}) ${d.slice(0, 160)}`).join("; "),
+      "The new image must be visually distinct from the past themes — different subject, composition, palette, or framing.",
     );
   }
+
   parts.push(
-    "Natural lighting, warm color palette, shallow depth of field, no on-image text, no logos.",
+    "## Style",
+    "Natural lighting, warm color palette, shallow depth of field, candid framing. No text, no logos, no watermarks, no UI overlays — repeating the rule because it is the most important constraint.",
   );
-  return parts.join(" ");
+
+  return parts.join("\n");
+}
+
+/**
+ * 2026-05-24 #A: build the SHORT, English-only summary stored in
+ * media_library.ai_description. This is what gets fed back to the
+ * NEXT image's anti-similarity hint, so it has to be safe to put
+ * back into a Gemini prompt (no JP body, no risk of being mistaken
+ * for transcription text).
+ *
+ * Keep it under ~120 chars and structured.
+ */
+function buildAiImageDescription(opts: {
+  topicTags: string[];
+  hashtags: string[];
+  pillar?: ContentPillar | null;
+}): string {
+  const subjectKeys = [...opts.topicTags, ...opts.hashtags]
+    .map((t) => t.replace(/^#+/, "").trim())
+    .filter(Boolean)
+    .slice(0, 4)
+    .join(", ");
+  const pillar = opts.pillar?.name ?? "general";
+  const parts: string[] = [
+    `pillar=${pillar}`,
+    subjectKeys ? `subjects=${subjectKeys}` : "subjects=general",
+    "style=lifestyle-warm-natural",
+  ];
+  return parts.join(" / ").slice(0, 200);
 }
 
 type GeminiInlineImage = {
@@ -174,6 +241,21 @@ export async function generateAiImageForUser(
   userId: string,
   aiConfigId: string | null,
   prompt: string,
+  /**
+   * 2026-05-24 #A: short English-only description to store in
+   * media_library.ai_description. This value is fed back into the
+   * NEXT image's anti-similarity hint, so it must be safe to put
+   * into a Gemini prompt without triggering "draw this text"
+   * behavior. Auto-attach builds it via buildAiImageDescription.
+   *
+   * When omitted (e.g. the manual /api/media/generate endpoint
+   * where the user typed a free-text prompt), we fall back to a
+   * truncated copy of the prompt — same as the pre-fix behavior.
+   * Manual prompts are far less risky than auto-built ones
+   * because the user is intentionally crafting them, but ideally
+   * the manual endpoint would also pass a sanitized description.
+   */
+  description?: string,
 ): Promise<MediaLibraryRow> {
   const { buffer, mime } = await callGeminiImage(prompt);
   const blob = new Blob([new Uint8Array(buffer)], { type: mime });
@@ -182,6 +264,9 @@ export async function generateAiImageForUser(
   const path = buildStoragePath(userId, aiConfigId, `${id}.${ext}`);
 
   const { publicUrl } = await uploadToUserMedia(client, path, blob, mime);
+
+  const safeDescription =
+    description ?? prompt.replace(/[　-鿿]+/g, "").slice(0, 200);
 
   const { data, error } = await client
     .from("media_library")
@@ -192,7 +277,7 @@ export async function generateAiImageForUser(
       public_url: publicUrl,
       source: "ai_generated",
       tags: [],
-      ai_description: prompt,
+      ai_description: safeDescription,
       file_size_bytes: buffer.length,
     })
     .select("*")
@@ -205,3 +290,10 @@ export async function generateAiImageForUser(
   }
   return data as MediaLibraryRow;
 }
+
+/**
+ * Re-export so call sites can build the short description that
+ * generateAiImageForUser stores (and that gets recycled into the next
+ * image's anti-similarity hint).
+ */
+export { buildAiImageDescription };
