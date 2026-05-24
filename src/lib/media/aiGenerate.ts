@@ -360,10 +360,11 @@ export function buildImagePromptFromPost(
   //     might be interpreted as something to write.
   //     ↓ DO NOT REMOVE OR WEAKEN — text-glyph fix from earlier #A.
   parts.push(
-    "## ABSOLUTE RULE — NO TEXT OR WRITING IN THE IMAGE",
+    "## ABSOLUTE RULE — NO TEXT, DIAGRAMS, OR SCHEMATICS IN THE IMAGE",
     "The image MUST NOT contain ANY of the following: text, letters, words, characters, kanji, hiragana, katakana, numbers, captions, subtitles, watermarks, logos, brand marks, UI elements, labels, speech bubbles, signage, billboards, posters, menus, receipts, business cards, t-shirt prints, book covers, document text, screen text on phones or computers, blackboard writing, neon signs, or any other readable mark.",
-    "Every surface that could carry writing (signs, screens, posters, packaging, clothing, papers) must be blank, abstract, decorative, or out of focus.",
-    "If you are uncertain whether something might be read as text, leave it out entirely. Wordless, text-free image.",
+    "Also forbidden: diagrams, flowcharts, charts, graphs, schematic drawings, circuit diagrams, block diagrams, network or node-and-edge drawings, mind maps, org charts, infographics, wall graphics depicting connected shapes, arrows linking boxes, abstract symbolic illustrations, icons, pictograms, or any drawn lines that imply meaning.",
+    "Every surface that could carry writing OR diagrams (signs, screens, posters, packaging, clothing, papers, walls, whiteboards, blackboards, notebooks shown open) must be blank, abstract, decorative, or out of focus.",
+    "Photographic, naturalistic visuals only. No symbolic, schematic, or diagrammatic content of any kind. If you are uncertain whether something might be read as text or as a diagram, leave it out entirely.",
   );
 
   // (3) Semantic subject — wrap so the model treats keywords as
@@ -463,10 +464,11 @@ export function buildImagePromptAndChoice(
   const parts: string[] = [
     "Generate a single photorealistic 4:5 vertical lifestyle photograph suitable for a Japanese small-business social post.",
     // ↓ DO NOT REMOVE OR WEAKEN — text-glyph fix from earlier #A.
-    "## ABSOLUTE RULE — NO TEXT OR WRITING IN THE IMAGE",
+    "## ABSOLUTE RULE — NO TEXT, DIAGRAMS, OR SCHEMATICS IN THE IMAGE",
     "The image MUST NOT contain ANY of the following: text, letters, words, characters, kanji, hiragana, katakana, numbers, captions, subtitles, watermarks, logos, brand marks, UI elements, labels, speech bubbles, signage, billboards, posters, menus, receipts, business cards, t-shirt prints, book covers, document text, screen text on phones or computers, blackboard writing, neon signs, or any other readable mark.",
-    "Every surface that could carry writing (signs, screens, posters, packaging, clothing, papers) must be blank, abstract, decorative, or out of focus.",
-    "If you are uncertain whether something might be read as text, leave it out entirely. Wordless, text-free image.",
+    "Also forbidden: diagrams, flowcharts, charts, graphs, schematic drawings, circuit diagrams, block diagrams, network or node-and-edge drawings, mind maps, org charts, infographics, wall graphics depicting connected shapes, arrows linking boxes, abstract symbolic illustrations, icons, pictograms, or any drawn lines that imply meaning.",
+    "Every surface that could carry writing OR diagrams (signs, screens, posters, packaging, clothing, papers, walls, whiteboards, blackboards, notebooks shown open) must be blank, abstract, decorative, or out of focus.",
+    "Photographic, naturalistic visuals only. No symbolic, schematic, or diagrammatic content of any kind. If you are uncertain whether something might be read as text or as a diagram, leave it out entirely.",
   ];
   if (semanticSubjects.length > 0) {
     parts.push(
