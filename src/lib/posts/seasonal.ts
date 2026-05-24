@@ -107,3 +107,121 @@ export function getSeasonalHint(date: Date = new Date()): string {
   }
   return MONTH_DEFAULTS[m] ?? "";
 }
+
+/**
+ * 2026-05-24 #E follow-up: "stale event" suppression list.
+ *
+ * Even with the positive hint sanitized, the LLM keeps writing
+ * stale May tropes ("GW明け", "新生活") on 5/24 because its training
+ * data heavily associates May with those keywords. The earlier #E
+ * fix scrubbed the hint output but did nothing to actively warn the
+ * LLM away from those words. This adds a NEGATIVE list:
+ *
+ *   "these words were fresh recently and are now expired —
+ *    do not use them in this post"
+ *
+ * Each entry has a [from, until] (MM, DD) freshness window. An entry
+ * is returned as "stale" when:
+ *   - today is past the window's `until`, AND
+ *   - today is within DECAY_DAYS days after `until`
+ *
+ * After DECAY_DAYS the event is so far in the past that no LLM
+ * would invoke it anyway (no point spending prompt tokens telling
+ * Anthropic to avoid 七夕 in November). Year-crossing windows
+ * (年越し: 12/28→1/3) are handled by checking both branches.
+ */
+type SeasonalEvent = {
+  keyword: string;
+  /** [month, day] inclusive. */
+  from: [number, number];
+  /** [month, day] inclusive. */
+  until: [number, number];
+};
+
+const SEASONAL_EVENTS: SeasonalEvent[] = [
+  // 1月
+  { keyword: "新年", from: [1, 1], until: [1, 10] },
+  { keyword: "三が日", from: [1, 1], until: [1, 3] },
+  { keyword: "初詣", from: [1, 1], until: [1, 7] },
+  { keyword: "年始の挨拶", from: [1, 4], until: [1, 15] },
+  // 2月
+  { keyword: "節分", from: [1, 25], until: [2, 5] },
+  { keyword: "立春", from: [1, 30], until: [2, 10] },
+  { keyword: "バレンタイン", from: [2, 1], until: [2, 16] },
+  // 3月
+  { keyword: "ひな祭り", from: [2, 25], until: [3, 5] },
+  { keyword: "ホワイトデー", from: [3, 8], until: [3, 16] },
+  { keyword: "卒業", from: [3, 1], until: [3, 31] },
+  { keyword: "年度末", from: [3, 15], until: [4, 5] },
+  // 3-4月
+  { keyword: "桜", from: [3, 20], until: [4, 15] },
+  { keyword: "花見", from: [3, 20], until: [4, 15] },
+  { keyword: "入学", from: [3, 25], until: [4, 15] },
+  { keyword: "入社", from: [3, 25], until: [4, 15] },
+  { keyword: "新生活", from: [3, 20], until: [4, 30] },
+  // 4-5月
+  { keyword: "GW", from: [4, 25], until: [5, 10] },
+  { keyword: "ゴールデンウィーク", from: [4, 25], until: [5, 10] },
+  { keyword: "連休", from: [4, 25], until: [5, 8] },
+  { keyword: "GW明け", from: [5, 6], until: [5, 15] },
+  { keyword: "五月病", from: [5, 6], until: [5, 25] },
+  { keyword: "母の日", from: [5, 1], until: [5, 14] },
+  // 6月
+  { keyword: "梅雨入り", from: [5, 25], until: [6, 30] },
+  { keyword: "梅雨", from: [6, 1], until: [7, 15] },
+  { keyword: "父の日", from: [6, 1], until: [6, 18] },
+  // 7月
+  { keyword: "七夕", from: [6, 25], until: [7, 8] },
+  { keyword: "梅雨明け", from: [7, 15], until: [8, 5] },
+  { keyword: "夏休み", from: [7, 15], until: [8, 31] },
+  // 8月
+  { keyword: "お盆", from: [8, 10], until: [8, 17] },
+  { keyword: "盛夏", from: [7, 20], until: [8, 20] },
+  { keyword: "残暑", from: [8, 25], until: [9, 20] },
+  // 9月
+  { keyword: "敬老の日", from: [9, 1], until: [9, 22] },
+  { keyword: "シルバーウィーク", from: [9, 15], until: [9, 25] },
+  { keyword: "秋分", from: [9, 20], until: [9, 25] },
+  // 10月
+  { keyword: "紅葉", from: [10, 15], until: [12, 5] },
+  { keyword: "ハロウィン", from: [10, 20], until: [10, 31] },
+  // 11月
+  { keyword: "文化の日", from: [10, 28], until: [11, 5] },
+  { keyword: "勤労感謝", from: [11, 18], until: [11, 25] },
+  // 12月
+  { keyword: "クリスマス", from: [12, 10], until: [12, 26] },
+  { keyword: "忘年会", from: [11, 25], until: [12, 31] },
+  { keyword: "年末", from: [12, 20], until: [12, 31] },
+  { keyword: "大晦日", from: [12, 28], until: [12, 31] },
+];
+
+/**
+ * Return event keywords whose freshness window does NOT include today.
+ *
+ * Per the spec ("春以外の『新生活』、12月以外の『クリスマス』、晩夏
+ * 以外の『残暑』"), the suppression list must hold for the ENTIRE
+ * off-season, not just the few weeks after a window closes — the
+ * LLM would otherwise write "新生活" in autumn from training-data
+ * muscle memory. An earlier draft with a 35-day decay missed this.
+ *
+ * Currently in-window events are NOT returned — the positive hint
+ * already covers them, and suppressing an active event would be wrong.
+ *
+ * Result: typically ~30-40 keywords on any given day. Cheap prompt
+ * tokens for very high suppression coverage.
+ */
+export function getStaleEvents(date: Date = new Date()): string[] {
+  const today = jstYMD(date);
+  const stale: string[] = [];
+  for (const ev of SEASONAL_EVENTS) {
+    const active = inWindow(today.m, today.d, {
+      fromMonth: ev.from[0],
+      fromDay: ev.from[1],
+      toMonth: ev.until[0],
+      toDay: ev.until[1],
+      hint: "",
+    });
+    if (!active) stale.push(ev.keyword);
+  }
+  return stale;
+}

@@ -202,6 +202,16 @@ ${aiConfig.world_view ?? ""}
   return prompt;
 }
 
+/**
+ * "5月24日" style JP date for prompt context. Always JST regardless
+ * of the server timezone so the displayed date matches the date the
+ * stale-event window math is based on.
+ */
+function formatJstDateForPrompt(now: Date = new Date()): string {
+  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  return `${jst.getUTCMonth() + 1}月${jst.getUTCDate()}日`;
+}
+
 export function buildUserPrompt(
   theme?: string,
   context?: {
@@ -210,6 +220,15 @@ export function buildUserPrompt(
     pillar?: ContentPillar | null;
     /** Phase 17: short JP phrase describing the current season. */
     seasonalHint?: string | null;
+    /**
+     * 2026-05-24 #E follow-up: event keywords whose freshness window
+     * recently ended. Surfaced in the prompt as an explicit
+     * "do NOT mention these" list. Solves the case where the LLM
+     * wrote "GW明け" on 5/24 even though the positive seasonal hint
+     * had been sanitized — the LLM's training-data muscle memory
+     * was the source, and only a negative suppression list stops it.
+     */
+    staleEvents?: string[];
     /** Phase 17: 8–10 recent post bodies for "don't reuse these" cue. */
     recentBodies?: string[];
   },
@@ -232,6 +251,17 @@ export function buildUserPrompt(
   const seasonal = context?.seasonalHint?.trim();
   if (seasonal) {
     base += `\n\n【ゆるい季節背景】\n${seasonal}\n※ 自然な範囲で寄せてよいが、毎回触れる必要はない`;
+  }
+
+  // 2026-05-24 #E follow-up: explicit stale-event suppression.
+  // Without this, the LLM kept writing "GW明け" / "新生活" on 5/24
+  // from May training-data muscle memory, even after the positive
+  // seasonal hint was sanitized of those words.
+  const stale = (context?.staleEvents ?? [])
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (stale.length > 0) {
+    base += `\n\n【期間切れで使わない方が良い語（今日は ${formatJstDateForPrompt()}）】\n${stale.join(" / ")}\n※ これらは最近終わったイベント・季節キーワード。本文・テーマ・ハッシュタグの何処にも使わないこと（過去ネタとして振り返るのは可）。`;
   }
 
   // Phase 17: recent bodies for "don't repeat yourself" cue. More
@@ -379,6 +409,8 @@ export async function generatePostDraft(
     pillar?: ContentPillar | null;
     /** Phase 17: getSeasonalHint() result, or null/empty to skip. */
     seasonalHint?: string | null;
+    /** 2026-05-24 #E follow-up: stale-event suppression list. */
+    staleEvents?: string[];
     /** Phase 17: ~10 recent post bodies for the "don't repeat" cue. */
     recentBodies?: string[];
   },
@@ -389,6 +421,7 @@ export async function generatePostDraft(
     recentOpenings: context?.recentOpenings,
     pillar: context?.pillar,
     seasonalHint: context?.seasonalHint,
+    staleEvents: context?.staleEvents,
     recentBodies: context?.recentBodies,
   });
   const attempts: string[] = [];

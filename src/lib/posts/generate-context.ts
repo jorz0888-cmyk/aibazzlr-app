@@ -8,7 +8,7 @@ import {
   generateContentPillars,
   selectPillarAntiRecency,
 } from "@/lib/posts/pillars";
-import { getSeasonalHint } from "@/lib/posts/seasonal";
+import { getSeasonalHint, getStaleEvents } from "@/lib/posts/seasonal";
 
 type Client = SupabaseClient<Database>;
 
@@ -19,6 +19,14 @@ const RECENT_OPENING_LIMIT = 10;
 export type GenerateContext = {
   pillar: ContentPillar | null;
   seasonalHint: string;
+  /**
+   * 2026-05-24 #E follow-up: event keywords whose freshness window
+   * ended within the last ~35 days. The user prompt tells the LLM
+   * NOT to mention these (e.g. on 5/24, this includes "GW明け",
+   * "新生活", "桜" — all in the LLM's May training-data muscle
+   * memory but past their actual freshness).
+   */
+  staleEvents: string[];
   recentBodies: string[];
   recentOpenings: string[];
   /** True iff we just minted pillars on the fly (caller may want to log). */
@@ -119,6 +127,7 @@ export async function buildGenerateContext(
   return {
     pillar,
     seasonalHint: getSeasonalHint(),
+    staleEvents: getStaleEvents(),
     recentBodies,
     recentOpenings,
     pillarsGeneratedNow,

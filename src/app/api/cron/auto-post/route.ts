@@ -254,6 +254,7 @@ async function processSchedule(
       recentOpenings: genCtx.recentOpenings,
       pillar: genCtx.pillar,
       seasonalHint: genCtx.seasonalHint,
+      staleEvents: genCtx.staleEvents,
       recentBodies: genCtx.recentBodies,
     });
   } catch (e) {

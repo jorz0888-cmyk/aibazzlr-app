@@ -84,6 +84,7 @@ export async function POST(request: NextRequest) {
       recentOpenings: genCtx.recentOpenings,
       pillar: genCtx.pillar,
       seasonalHint: genCtx.seasonalHint,
+      staleEvents: genCtx.staleEvents,
       recentBodies: genCtx.recentBodies,
     });
   } catch (e) {
