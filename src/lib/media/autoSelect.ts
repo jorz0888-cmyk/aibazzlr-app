@@ -8,7 +8,7 @@ import type {
 import { selectFromLibrary } from "./selector";
 import {
   buildAiImageDescription,
-  buildImagePromptFromPost,
+  buildImagePromptAndChoice,
   generateAiImageForUser,
   GeminiGenerationError,
 } from "./aiGenerate";
@@ -520,17 +520,26 @@ async function tryGeminiGenerate(opts: {
     pool_target: TARGET_POOL_SIZE,
   });
 
-  const prompt = buildImagePromptFromPost(postContent, topicTags, hashtags, {
-    pillar,
-    recentImageDescriptions: recentDescriptions,
-  });
-  // 2026-05-24 #A: store a SHORT, JP-free description so the next
-  // anti-similarity hint we feed back doesn't recycle JP body text
-  // into the prompt.
+  // 2026-05-24 #C-2: composite builder returns prompt + the
+  // styleKey + sceneSlug that were actually picked. We pass those
+  // into buildAiImageDescription so the stored description records
+  // the exact slug — the next call's anti-similarity hint then
+  // sees `scene=<slug>` and the picker biases away from it.
+  const { prompt, styleKey, sceneSlug } = buildImagePromptAndChoice(
+    postContent,
+    topicTags,
+    hashtags,
+    {
+      pillar,
+      recentImageDescriptions: recentDescriptions,
+    },
+  );
   const shortDescription = buildAiImageDescription({
     topicTags,
     hashtags,
     pillar,
+    styleKey,
+    sceneSlug,
   });
 
   let media: MediaLibraryRow;

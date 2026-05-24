@@ -46,38 +46,189 @@ export class GeminiGenerationError extends Error {
  * SAME no-text instruction block at the top of the prompt. Style
  * only swaps palette / composition / subject framing.
  */
+/**
+ * 2026-05-24 #C-2: each style is now (palette + composition) tone
+ * direction PLUS a subjectPool of distinct scenes. Per generation
+ * we pick ONE pool entry — not all of them — so the same style
+ * doesn't keep painting "laptop + mug + plant" forever. The picked
+ * entry's slug is encoded into ai_description so the next image's
+ * anti-similarity hint sees which scenes were just used.
+ *
+ * Mix of with-people / no-people / hands-only / environmental per
+ * style, so within a single style we still vary subject type.
+ */
 const IMAGE_STYLE_VARIANTS = {
   "warm-natural": {
     palette:
       "Warm earth tones, soft natural daylight from a window, beige / amber / honey accents",
     composition:
       "Candid lifestyle framing, slightly soft focus, intimate close-to-medium shot",
-    subjectHint:
-      "Cozy domestic, cafe, or sunlit-room setting. Strongly prefer still-life (a cup on a table, a notebook with a hand on it, an open window, indoor plants) over portraits. If a person does appear, vary age (could be 20s through 60s) and gender across images — explicitly do NOT default to a young woman.",
+    subjectPool: [
+      {
+        slug: "wn-cup-window",
+        scene:
+          "A single ceramic cup of tea or coffee on a wooden table near a sunlit window, no people, soft window light, steam barely visible.",
+      },
+      {
+        slug: "wn-hands-notebook",
+        scene:
+          "Close-up on hands of an indeterminate adult (age 30s-60s, vary gender each generation) writing in a paper notebook by warm morning light. Face out of frame. Sleeve color varies — knit / linen / chambray.",
+      },
+      {
+        slug: "wn-windowsill-plant",
+        scene:
+          "A potted plant on a windowsill with curtain shadows falling across a wall behind. Pure still life, no people. Pot material varies between terracotta, glazed ceramic, or wood.",
+      },
+      {
+        slug: "wn-floor-corner",
+        scene:
+          "A quiet floor-level corner of a room — slippers and a folded throw blanket on a hardwood floor, half a chair leg visible, slanted window light. No people in frame.",
+      },
+      {
+        slug: "wn-book-chair",
+        scene:
+          "An open book lying face down on a rattan or upholstered chair, a small side table with a cup, late afternoon golden light, no people.",
+      },
+      {
+        slug: "wn-breakfast-counter",
+        scene:
+          "A simple breakfast on a kitchen counter — bowl with fruit, a glass of water, a folded cloth napkin — flat-ish angle. No person visible.",
+      },
+      {
+        slug: "wn-back-window-figure",
+        scene:
+          "A back-view of a single person standing by a window looking out, age and gender unspecified (please vary). Soft silhouette against bright outside light. No face visible.",
+      },
+    ],
   },
   "clean-minimal": {
     palette:
       "White or light-grey background, soft shadows, a single accent color (could be muted blue, sage, or terracotta — vary across images)",
     composition:
       "Studio-style centered single subject or symmetric flat-lay, generous negative space, very sharp focus, no human figures",
-    subjectHint:
-      "A single object or small grouping on a clean surface — a folded notebook, a pen, a single fruit, a small ceramic dish, a smartphone face-down. No people at all. Quiet, almost editorial feel.",
+    subjectPool: [
+      {
+        slug: "cm-folded-notebook",
+        scene:
+          "A single closed notebook centered on a clean white surface, a small accent (a pen or paperclip) placed beside it. Editorial flat-lay overhead view.",
+      },
+      {
+        slug: "cm-single-fruit",
+        scene:
+          "A single piece of fruit (lemon, apple, persimmon — vary) on a plain pale surface, centered, soft directional shadow.",
+      },
+      {
+        slug: "cm-ceramic-dish",
+        scene:
+          "An empty small ceramic dish or bowl on white surface, centered, almost architectural. No food, no people.",
+      },
+      {
+        slug: "cm-pencil-eraser",
+        scene:
+          "A single mechanical pencil and a small geometric eraser arranged on a clean off-white surface. Top-down composition with negative space.",
+      },
+      {
+        slug: "cm-folded-cloth",
+        scene:
+          "A neatly folded cotton cloth or linen napkin on a clean surface, accent color folded inward. Almost wabi-sabi simplicity.",
+      },
+      {
+        slug: "cm-phone-down",
+        scene:
+          "A smartphone laid face-down on a white surface, no visible screen, with one small accent object (a coin / small stone / leaf) beside it. Editorial spacing.",
+      },
+      {
+        slug: "cm-glass-water",
+        scene:
+          "A single glass of water on a clean light grey surface, condensation visible, soft side lighting. Pure still life.",
+      },
+    ],
   },
   "energetic-bright": {
     palette:
       "High saturation, bold mid-day daylight, contrasting accent colors (vary which color leads across images — could be vivid green, deep red, or saturated blue)",
     composition:
       "Dynamic angle (low-angle, Dutch tilt, or overhead 3/4), subtle motion blur in foreground or background, more visual energy",
-    subjectHint:
-      "Outdoor street or seasonal scene, vivid food shot, weather / sky element, a moment of action (rain on pavement, steam rising from a cup, leaves in motion). Avoid signage and neon since they tend to carry text. If a person appears, only show movement or back-of-head — never full face — and vary their attire and age.",
+    subjectPool: [
+      {
+        slug: "eb-steam-cup",
+        scene:
+          "Strong overhead light catching steam rising from a hot cup, dark surface beneath, dramatic contrast. No text, no logos. Object-only.",
+      },
+      {
+        slug: "eb-leaves-motion",
+        scene:
+          "Autumn or summer leaves caught mid-fall against a bright sky, slight motion blur. Pure nature shot, no people.",
+      },
+      {
+        slug: "eb-rain-pavement",
+        scene:
+          "Rain on dark city pavement seen from a low angle, reflected colored light from above (could be sunset or storefront glow). No legible signage. No faces.",
+      },
+      {
+        slug: "eb-vivid-food",
+        scene:
+          "A vibrant single-dish food shot — colorful salad / fresh fruit bowl / curry / ramen — top-down with one bright accent. Plate or bowl varies (white ceramic, dark stoneware, lacquer).",
+      },
+      {
+        slug: "eb-back-walking",
+        scene:
+          "A back-view of a person walking quickly through a colorful environment — could be a market, a plaza, a station — motion blur on background. Attire varies (suit, casual, coat). No face visible.",
+      },
+      {
+        slug: "eb-cyclist-blur",
+        scene:
+          "A blurred cyclist passing through a bright outdoor scene, panning blur on background. Pure motion shot, no readable text on storefronts behind.",
+      },
+      {
+        slug: "eb-sky-window",
+        scene:
+          "A dramatic sky photographed through a wide window — dawn, sunset, or storm — no horizon line cluttered with signage. Object-only.",
+      },
+    ],
   },
   "professional-workspace": {
     palette:
       "Neutral cool tones, controlled even daylight, navy / slate / muted grey accents, occasional warm wood",
     composition:
       "Structured composition, sharp focus, slight overhead or 3/4-overhead angle, organized framing",
-    subjectHint:
-      "Workspace stillness — a closed laptop, an open notebook with a pen across it, a coffee mug, a small succulent on a desk. If a person appears, show only hands on a keyboard or pen — never a face. Vary the visible clothing (sweater / button-down / casual) across images so it doesn't read as the same person.",
+    subjectPool: [
+      {
+        slug: "pw-desk-overhead",
+        scene:
+          "Overhead view of an organized desk — closed laptop, a notebook, a pen, a coffee mug. Vary the laptop's color (silver / dark / matte) and surrounding accents (succulent or plain). No screen content visible.",
+      },
+      {
+        slug: "pw-hands-keyboard",
+        scene:
+          "Close-up on hands of an indeterminate adult typing on a keyboard. Vary visible cuff color (sweater knit / button-down / casual). No face, no screen text visible.",
+      },
+      {
+        slug: "pw-meeting-table",
+        scene:
+          "An empty conference / meeting table with two coffee cups and a small notebook left behind, soft daylight from a side window. No people, no logos on cups.",
+      },
+      {
+        slug: "pw-office-space",
+        scene:
+          "Wide architectural shot of a clean, modern office room — empty chairs, a long table, neutral palette — no people present, no readable text on walls or whiteboards (whiteboards completely blank).",
+      },
+      {
+        slug: "pw-tools-flatlay",
+        scene:
+          "Flat-lay of work tools — wired headphones coiled, a stack of notebooks, a fountain pen, a closed laptop — overhead, structured grid composition. No screen visible.",
+      },
+      {
+        slug: "pw-window-view",
+        scene:
+          "A window view from a quiet office — buildings or trees outside, an empty chair foreground, neutral interior tones, weather-soft light. No people.",
+      },
+      {
+        slug: "pw-coffee-pour",
+        scene:
+          "Side angle of coffee being poured from a stainless server into a plain mug on a clean desk surface. Hand visible only briefly, no face. No barista signage.",
+      },
+    ],
   },
 } as const;
 
@@ -108,6 +259,34 @@ function styleKeyForPillar(
     h = Math.imul(h, 16777619) >>> 0;
   }
   return IMAGE_STYLE_KEYS[h % IMAGE_STYLE_KEYS.length];
+}
+
+/**
+ * 2026-05-24 #C-2: pick ONE subjectPool entry per image generation.
+ *
+ * Biased away from slugs that appear in recent descriptions (so back-
+ * to-back posts in the same style don't keep landing on the same
+ * scene). If every pool entry is recently used, fall back to pure
+ * random over the full pool.
+ *
+ * Returns both the long scene description (for the prompt) and the
+ * short slug (for ai_description, which feeds the next call's anti-
+ * similarity hint).
+ */
+function pickPoolEntry(
+  pool: ReadonlyArray<{ slug: string; scene: string }>,
+  recentDescriptions: string[],
+): { slug: string; scene: string } {
+  if (pool.length === 0) {
+    return { slug: "fallback", scene: "Generic lifestyle scene." };
+  }
+  const recentBlob = recentDescriptions.join(" ").toLowerCase();
+  const unused = pool.filter(
+    (entry) => !recentBlob.includes(entry.slug.toLowerCase()),
+  );
+  const candidates = unused.length > 0 ? unused : pool;
+  const idx = Math.floor(Math.random() * candidates.length);
+  return candidates[idx];
 }
 
 /**
@@ -163,6 +342,14 @@ export function buildImagePromptFromPost(
   );
   const style = IMAGE_STYLE_VARIANTS[styleKey];
 
+  // 2026-05-24 #C-2: pick ONE specific scene from the style's pool.
+  // Bias away from slugs found in the past 5 descriptions so same-
+  // style consecutive posts don't render the same scene.
+  const pickedScene = pickPoolEntry(
+    style.subjectPool,
+    options.recentImageDescriptions ?? [],
+  );
+
   const parts: string[] = [];
 
   parts.push(
@@ -188,10 +375,11 @@ export function buildImagePromptFromPost(
     );
   }
 
-  // Variant-specific subject framing. Always added (replaces the
-  // old hardcoded "warm everyday moment in a Japanese small
-  // business setting" default that was forcing a single aesthetic).
-  parts.push("## Subject framing", style.subjectHint);
+  // Variant-specific subject framing. One scene picked per call from
+  // the style's pool — see pickPoolEntry above. This is what fixes
+  // the "every professional-workspace image is laptop+mug+plant"
+  // collapse: same style across posts, different scene per post.
+  parts.push("## Specific scene to draw", pickedScene.scene);
 
   if (options.pillar) {
     parts.push(
@@ -230,6 +418,91 @@ export function buildImagePromptFromPost(
 }
 
 /**
+ * 2026-05-24 #C-2: composite builder that returns BOTH the Gemini
+ * prompt AND the chosen scene slug + style key. autoSelect uses the
+ * slug as the `scene=` field in ai_description so the next image's
+ * anti-similarity hint sees which pool entries were just used.
+ *
+ * Replaces the pattern where caller had to call buildImagePromptFromPost
+ * then re-run the picker for the description — which broke because
+ * Math.random() returned a different choice the second time.
+ */
+export function buildImagePromptAndChoice(
+  content: string,
+  topicTags: string[],
+  hashtags: string[],
+  options: {
+    pillar?: ContentPillar | null;
+    recentImageDescriptions?: string[];
+  } = {},
+): { prompt: string; styleKey: ImageStyleKey; sceneSlug: string } {
+  const styleKey = styleKeyForPillar(
+    options.pillar?.id ?? null,
+    topicTags[0] ?? hashtags[0] ?? "default",
+  );
+  const sceneSlug = pickPoolEntry(
+    IMAGE_STYLE_VARIANTS[styleKey].subjectPool,
+    options.recentImageDescriptions ?? [],
+  ).slug;
+  // buildImagePromptFromPost re-runs the picker internally; since
+  // it's same-process and we already chose, we can't perfectly pin
+  // the picker. To keep this race-free, we re-implement the prompt
+  // build inline here using our pre-chosen scene.
+  const style = IMAGE_STYLE_VARIANTS[styleKey];
+  const scene =
+    style.subjectPool.find((p) => p.slug === sceneSlug)?.scene ??
+    style.subjectPool[0]?.scene ??
+    "";
+
+  void content;
+  const semanticSubjects = [...topicTags, ...hashtags]
+    .map((t) => t.replace(/^#+/, "").trim())
+    .filter(Boolean)
+    .slice(0, 6);
+
+  const parts: string[] = [
+    "Generate a single photorealistic 4:5 vertical lifestyle photograph suitable for a Japanese small-business social post.",
+    // ↓ DO NOT REMOVE OR WEAKEN — text-glyph fix from earlier #A.
+    "## ABSOLUTE RULE — NO TEXT OR WRITING IN THE IMAGE",
+    "The image MUST NOT contain ANY of the following: text, letters, words, characters, kanji, hiragana, katakana, numbers, captions, subtitles, watermarks, logos, brand marks, UI elements, labels, speech bubbles, signage, billboards, posters, menus, receipts, business cards, t-shirt prints, book covers, document text, screen text on phones or computers, blackboard writing, neon signs, or any other readable mark.",
+    "Every surface that could carry writing (signs, screens, posters, packaging, clothing, papers) must be blank, abstract, decorative, or out of focus.",
+    "If you are uncertain whether something might be read as text, leave it out entirely. Wordless, text-free image.",
+  ];
+  if (semanticSubjects.length > 0) {
+    parts.push(
+      "## Subject (interpret as visual concept, DO NOT render these words as text in the image)",
+      semanticSubjects.join(", "),
+    );
+  }
+  parts.push("## Specific scene to draw", scene);
+  if (options.pillar) {
+    parts.push(
+      "## Angle (interpret as composition direction, DO NOT render the words)",
+      `${options.pillar.name}: ${options.pillar.description}`,
+    );
+  }
+  const recent = (options.recentImageDescriptions ?? [])
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 5);
+  if (recent.length > 0) {
+    parts.push(
+      "## Past visual themes for this account (do NOT render these as text either)",
+      recent.map((d, i) => `(${i + 1}) ${d.slice(0, 160)}`).join("; "),
+      "The new image must be visually distinct from the past themes — different subject, composition, palette, or framing.",
+    );
+  }
+  parts.push(
+    "## Style",
+    `Palette: ${style.palette}.`,
+    `Composition: ${style.composition}.`,
+    "No text, no logos, no watermarks, no UI overlays anywhere in the image — repeating the most important constraint.",
+  );
+
+  return { prompt: parts.join("\n"), styleKey, sceneSlug };
+}
+
+/**
  * 2026-05-24 #A: build the SHORT, English-only summary stored in
  * media_library.ai_description. This is what gets fed back to the
  * NEXT image's anti-similarity hint, so it has to be safe to put
@@ -242,6 +515,12 @@ function buildAiImageDescription(opts: {
   topicTags: string[];
   hashtags: string[];
   pillar?: ContentPillar | null;
+  /** 2026-05-24 #C-2: the scene slug actually chosen by the picker.
+   *  Encoded as scene=<slug> so anti-similarity feedback can dodge
+   *  it. Caller passes the value returned by buildImagePromptAndChoice. */
+  sceneSlug?: string;
+  /** 2026-05-24 #C-2: style key actually chosen. Same source. */
+  styleKey?: ImageStyleKey;
 }): string {
   const subjectKeys = [...opts.topicTags, ...opts.hashtags]
     .map((t) => t.replace(/^#+/, "").trim())
@@ -249,20 +528,18 @@ function buildAiImageDescription(opts: {
     .slice(0, 4)
     .join(", ");
   const pillar = opts.pillar?.name ?? "general";
-  // 2026-05-24 style-variants: encode the actual variant we used.
-  // The previous hard-coded "lifestyle-warm-natural" string here made
-  // every description claim the same style even when we varied — and
-  // also fed that single style label back into the next image's
-  // anti-similarity hint, reinforcing the monochrome look.
-  const styleKey = styleKeyForPillar(
-    opts.pillar?.id ?? null,
-    opts.topicTags[0] ?? opts.hashtags[0] ?? "default",
-  );
+  const styleKey =
+    opts.styleKey ??
+    styleKeyForPillar(
+      opts.pillar?.id ?? null,
+      opts.topicTags[0] ?? opts.hashtags[0] ?? "default",
+    );
   const parts: string[] = [
     `pillar=${pillar}`,
     subjectKeys ? `subjects=${subjectKeys}` : "subjects=general",
     `style=${styleKey}`,
   ];
+  if (opts.sceneSlug) parts.push(`scene=${opts.sceneSlug}`);
   return parts.join(" / ").slice(0, 200);
 }
 
