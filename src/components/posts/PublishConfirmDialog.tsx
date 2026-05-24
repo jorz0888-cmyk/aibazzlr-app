@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Spinner } from "@/components/Spinner";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { weightedRenderedTweet } from "@/lib/posts/x-text";
 
 export type PublishMethod = "api" | "copy_paste";
 
@@ -28,6 +29,7 @@ export function PublishConfirmDialog({
   loading,
   publishError,
   defaultMethod = "api",
+  maxPostLength,
 }: {
   open: boolean;
   /** Used for the copy-paste sub-flow APIs (mark-as-awaiting-manual / mark-as-posted). */
@@ -49,6 +51,16 @@ export function PublishConfirmDialog({
   publishError?: string | null;
   /** Pre-select the radio: derive from AI config's posting_mode upstream. */
   defaultMethod?: PublishMethod;
+  /**
+   * 2026-05-24 #D-followup: per-config X-weighted ceiling. Falls back
+   * to 280 (the X non-Premium hard limit) if the caller doesn't have
+   * the config to hand, so we never under-report cap. The counter
+   * and over-cap badge are computed from this PLUS the same
+   * weightedRenderedTweet() the publisher uses — replaces the old
+   * `tweetText.length` + hardcoded 280 path that under-counted JP
+   * by half and let 558-count drafts through as "OK".
+   */
+  maxPostLength?: number;
 }) {
   const [abortPromptOpen, setAbortPromptOpen] = useState(false);
   const [method, setMethod] = useState<PublishMethod>(defaultMethod);
@@ -90,7 +102,16 @@ export function PublishConfirmDialog({
   if (!open) return null;
   const tagText = hashtags.join(" ");
   const tweetText = tagText ? `${content}\n\n${tagText}` : content;
-  const totalLen = tweetText.length;
+  // 2026-05-24 #D-followup: switched from tweetText.length (raw JS
+  // chars — under-counts JP by 2×) to the X-weighted counter the
+  // publisher / generator already use. Per-config cap replaces the
+  // hardcoded 280. JP-char approximation is shown alongside the raw
+  // count for clarity (same scheme as PostCard).
+  const totalLen = weightedRenderedTweet(content, hashtags);
+  const cap = maxPostLength ?? 280;
+  const over = totalLen > cap;
+  const totalLenJp = Math.round(totalLen / 2);
+  const capJp = Math.round(cap / 2);
 
   // ─── Sending state (only used when method === 'api') ──────────────────
   if (loading) {
@@ -199,8 +220,18 @@ export function PublishConfirmDialog({
             <pre className="max-h-60 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-line bg-bg/40 p-4 font-sans text-sm leading-relaxed text-ink">
               {tweetText}
             </pre>
-            <p className="text-[11px] text-ink-subtle">
-              文字数 {totalLen} / 280
+            <p
+              className={[
+                "text-[11px]",
+                over ? "text-danger" : "text-ink-subtle",
+              ].join(" ")}
+            >
+              約{totalLenJp}字 / {capJp}字（X基準・{totalLen}/{cap}カウント）
+              {over && (
+                <span className="ml-2 font-bold">
+                  ⚠ X の上限を超過しています
+                </span>
+              )}
             </p>
             <div className="flex flex-wrap gap-2">
               <button
@@ -354,8 +385,14 @@ export function PublishConfirmDialog({
             </div>
           )}
           <div className="rounded-lg border border-line bg-bg/40 p-4">
-            <div className="mb-2 text-[11px] uppercase tracking-wider text-ink-muted">
-              内容（{totalLen}文字）
+            <div
+              className={[
+                "mb-2 text-[11px] uppercase tracking-wider",
+                over ? "text-danger" : "text-ink-muted",
+              ].join(" ")}
+            >
+              内容（約{totalLenJp}字 / {capJp}字・X基準）
+              {over && <span className="ml-2">⚠ 上限超過</span>}
             </div>
             <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">
               {content}

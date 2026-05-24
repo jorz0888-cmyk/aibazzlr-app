@@ -445,6 +445,10 @@ export function PostCard({ post }: { post: PostListItem }) {
         content={post.content}
         hashtags={post.hashtags ?? []}
         imageUrl={post.image_url}
+        // 2026-05-24 #D-followup: pass per-config X-weighted cap so
+        // the dialog uses the same cap the publisher gates on. Was
+        // hardcoded 280 + raw .length comparison → false OK for JP.
+        maxPostLength={post.ai_config?.max_post_length ?? 280}
         onCancel={() => {
           setConfirming(false);
           setError(null);

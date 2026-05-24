@@ -4,9 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Spinner } from "@/components/Spinner";
 import { TagInput } from "@/components/hearing/TagInput";
+import { weightedRenderedTweet } from "@/lib/posts/x-text";
 import type { PostListItem } from "./types";
-
-const MAX_LEN = 280;
 
 export function PostEditorModal({
   post,
@@ -26,13 +25,22 @@ export function PostEditorModal({
 
   if (!open) return null;
 
-  const tagsText = hashtags.join(" ");
-  const totalLen = (tagsText ? content + "\n\n" + tagsText : content).length;
-  const over = totalLen > MAX_LEN;
+  // 2026-05-24 #D-followup: was `(text).length` against MAX_LEN=280
+  // hardcoded. For JP-centric content that under-counted by half:
+  // 150 JP chars = 150 raw chars (`.length`) but 300 X-weighted
+  // (over the 280 cap). The user could "save" then watch the
+  // publisher truncate. Now both inputs match the publisher.
+  const cap = post.ai_config?.max_post_length ?? 280;
+  const totalLen = weightedRenderedTweet(content, hashtags);
+  const over = totalLen > cap;
+  const totalLenJp = Math.round(totalLen / 2);
+  const capJp = Math.round(cap / 2);
 
   async function save() {
     if (over) {
-      setError(`280文字を超えています（${totalLen}文字）`);
+      setError(
+        `上限超過：${totalLenJp}字（${totalLen}カウント）/ 上限 ${capJp}字（${cap}カウント・X基準）`,
+      );
       return;
     }
     setError(null);
@@ -86,7 +94,9 @@ export function PostEditorModal({
             />
             <div className="mt-1 flex items-center justify-between text-[11px]">
               <span className={over ? "text-danger" : "text-ink-subtle"}>
-                {totalLen} / {MAX_LEN} 文字（本文 + ハッシュタグ）
+                約{totalLenJp}字 / {capJp}字（X基準・本文+ハッシュタグ／
+                {totalLen}/{cap}カウント）
+                {over && <span className="ml-1">⚠ 上限超過</span>}
               </span>
             </div>
           </div>
