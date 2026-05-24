@@ -272,6 +272,14 @@ export function PostCard({ post }: { post: PostListItem }) {
           // gates on, not raw JS string length. JP content scored ~2× low
           // before this fix and the badge would say "OK" while the publish
           // would 403 for length.
+          //
+          // 2026-05-24 #D: display in JP-char approximation (count / 2)
+          // because the previous "{count} 文字" suffix made users read the
+          // raw X-weighted count as "Japanese characters". For JP-centric
+          // content len/2 ≈ actual JP char count; for ASCII-heavy content
+          // it under-estimates by half but the "約" prefix and "(X基準)"
+          // suffix acknowledge that. Calculation logic itself is
+          // unchanged — over/warn still use the raw weighted count.
           const len = weightedRenderedTweet(
             post.content,
             post.hashtags ?? [],
@@ -279,6 +287,8 @@ export function PostCard({ post }: { post: PostListItem }) {
           const max = post.ai_config?.max_post_length ?? 140;
           const over = len > max;
           const warn = !over && len >= Math.floor(max * 0.9);
+          const lenJpApprox = Math.round(len / 2);
+          const maxJpApprox = Math.round(max / 2);
           return (
             <p
               className={[
@@ -290,7 +300,7 @@ export function PostCard({ post }: { post: PostListItem }) {
                     : "text-ink-subtle",
               ].join(" ")}
             >
-              ✏ {len} / {max}文字（X基準）
+              ✏ 約{lenJpApprox}字 / {maxJpApprox}字（X基準）
               {over && (
                 <span className="ml-2 font-sans">
                   ⚠ 上限超過 — 投稿時に末尾を切り詰めます

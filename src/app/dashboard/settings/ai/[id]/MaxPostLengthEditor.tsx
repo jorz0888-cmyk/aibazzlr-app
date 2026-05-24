@@ -5,12 +5,39 @@ import { useRouter } from "next/navigation";
 import { Spinner } from "@/components/Spinner";
 import { useToast } from "@/components/common/Toast";
 
+// 2026-05-24 #D: preset values are X-weighted counts (the unit
+// max_post_length stores). The previous label "{count}文字"
+// suggested "{count} Japanese characters", so a user picking 280
+// thought "I can write 280 JP chars" and got cut at the actual
+// 140-JP-char limit. Labels are now anchored on the JP-char
+// equivalent (≈ count / 2 for JP-centric content) with the raw
+// count in parentheses for transparency. Stored value unchanged.
 const PRESETS: Array<{ value: number; label: string; hint: string }> = [
-  { value: 140, label: "140文字", hint: "日本語におすすめ" },
-  { value: 280, label: "280文字", hint: "X 通常アカウントの上限" },
-  { value: 1000, label: "1,000文字", hint: "X Premium" },
-  { value: 4000, label: "4,000文字", hint: "X Premium" },
-  { value: 25000, label: "25,000文字", hint: "X Premium+" },
+  {
+    value: 140,
+    label: "日本語約70字",
+    hint: "控えめ（140カウント）",
+  },
+  {
+    value: 280,
+    label: "日本語約140字",
+    hint: "X 通常アカウントの実上限（280カウント・推奨）",
+  },
+  {
+    value: 1000,
+    label: "日本語約500字",
+    hint: "X Premium 必須（1,000カウント）",
+  },
+  {
+    value: 4000,
+    label: "日本語約2,000字",
+    hint: "X Premium 必須（4,000カウント）",
+  },
+  {
+    value: 25000,
+    label: "日本語約12,500字",
+    hint: "X Premium+（25,000カウント）",
+  },
 ];
 
 const PRESET_VALUES = new Set(PRESETS.map((p) => p.value));
@@ -53,7 +80,9 @@ export function MaxPostLengthEditor({
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
-      toast.success("保存しました", { description: "投稿の最大文字数" });
+      toast.success("保存しました", {
+        description: "投稿の最大カウント (X基準)",
+      });
       router.refresh();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "保存に失敗しました");
@@ -65,7 +94,11 @@ export function MaxPostLengthEditor({
 
   return (
     <div className="grid grid-cols-[140px_1fr] items-start gap-3 border-b border-line py-2.5 last:border-b-0">
-      <span className="pt-1 text-xs text-ink-muted">投稿の最大文字数</span>
+      <span className="pt-1 text-xs text-ink-muted">
+        投稿の最大カウント
+        <br />
+        <span className="font-mono text-[10px] text-ink-subtle">(X基準)</span>
+      </span>
       <div className="space-y-2">
         <div className="flex flex-wrap gap-2">
           {PRESETS.map((p) => {
@@ -122,10 +155,10 @@ export function MaxPostLengthEditor({
               className="input w-32"
               value={customStr}
               onChange={(e) => setCustomStr(e.target.value)}
-              placeholder="140"
+              placeholder="280"
               disabled={saving}
             />
-            <span className="text-xs text-ink-muted">文字</span>
+            <span className="text-xs text-ink-muted">カウント (X基準)</span>
             <button
               type="button"
               className="btn-primary px-3 py-2 text-xs"
@@ -146,15 +179,16 @@ export function MaxPostLengthEditor({
         )}
 
         <p className="text-[11px] leading-relaxed text-ink-subtle">
-          <b className="text-ink">X の数え方</b>：日本語などの全角は1文字を2として
-          カウント、半角英数は1文字を1としてカウント、URLは長さに関わらず23で
-          カウントします。X 通常アカウントの上限は 280 です。
+          <b className="text-ink">X の数え方（カウント）</b>：日本語などの全角は
+          1文字を2としてカウント、半角英数は1文字を1としてカウント、URLは長さに
+          関わらず23でカウントします。X 通常アカウントの実上限は{" "}
+          <b className="text-ink">280 カウント</b>（= 日本語約140字）です。
           <br />
           <b className="text-ink">日本語中心・通常アカウント</b> なら{" "}
-          <b className="text-cyan">140</b>（推奨）が安全
-          — ハッシュタグや URL が足されても X の上限に余裕を残せます。
-          280 を選ぶと境界ギリギリで、AI 出力が少しブレるだけで X から
-          拒否されることがあります。<br />
+          <b className="text-cyan">280 カウント（日本語約140字・推奨）</b>{" "}
+          が X の実上限ぴったりで標準。140 カウント（日本語約70字）は
+          余裕を見たい短文向け。1,000 以上のカウントは X Premium が必要です。
+          <br />
           投稿本文・ハッシュタグ・区切り文字を含めた合計が上限です。
         </p>
 
