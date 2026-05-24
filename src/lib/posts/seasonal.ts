@@ -16,19 +16,31 @@
  * to be UTC.
  */
 
+// 2026-05-24 #E: month defaults rewritten to remove固有イベント名
+// (新年/節分/立春/卒業/年度末/桜/入学/入社/GW明け/七夕/夏休み入り/
+// お盆/残暑/紅葉/ハロウィン/クリスマス/年末). These were getting
+// stuck deep into the month — e.g. May default kept saying
+// "GW明け" all the way through 5/31 even though GW ended 5/5.
+// Each default is now pure season / weather / nature language that
+// stays valid the entire month it covers.
+//
+// NOTABLE_WINDOWS (specific date windows like the GW or クリスマス
+// hints) are unchanged — when an event window matches, that
+// window's hint wins; the month default only fires for days
+// OUTSIDE every notable window.
 const MONTH_DEFAULTS: Record<number, string> = {
-  1: "新年・初春。空気は冷たく、店先にも年始の余韻がある時期",
-  2: "厳寒・節分・立春前後。寒さのピークだが少しずつ日が伸びる",
-  3: "早春・卒業/年度末。日中の陽気と朝晩の冷えが混在する",
-  4: "新生活・桜・入学/入社。新しい客層に出会う季節",
-  5: "GW明け・若葉・初夏の手前。日中は汗ばむ日も",
+  1: "厳寒・空気の透明感が増す時期。乾いた日中と冷えた朝晩",
+  2: "厳寒のピーク。日は少しずつ伸び、店先には春の予感が混じる",
+  3: "早春・寒暖差。日中の陽気と朝晩の冷えが混在する",
+  4: "春本番・気温が安定して上がる時期。屋外の心地よさが戻る",
+  5: "若葉・初夏の入り口・気温上昇期。日中は汗ばむ日も増える",
   6: "梅雨・じめじめ。傘とアイスの両立、室内消費が伸びる",
-  7: "本格的な夏・七夕・夏休み入り。日中の暑さと夕方の涼風",
-  8: "盛夏・お盆・残暑。夜まで蒸す日、冷たいメニューへの関心が高い",
-  9: "残暑→初秋。夕方から虫の声、秋めく食材が出始める",
-  10: "秋本番・紅葉・ハロウィン。気温差で体調を崩しやすい",
+  7: "本格的な夏・湿度の高い日中と夕方の涼風",
+  8: "盛夏・夜まで蒸す日が続き、冷たいメニューへの関心が高い",
+  9: "初秋・夕方の風が涼しくなり、秋めく食材が出始める",
+  10: "秋本番・乾いた空気・気温差で体調を崩しやすい",
   11: "晩秋・冷え込み。鍋・温かい飲み物が嬉しくなる",
-  12: "師走・クリスマス・年末。慌ただしさと年越し準備",
+  12: "師走・寒さ深まる・屋内が暖かく感じる時期",
 };
 
 type Window = {
