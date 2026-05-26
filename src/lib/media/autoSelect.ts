@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
+  AiConfig,
   ContentPillar,
   Database,
   ImageSource,
@@ -67,6 +68,14 @@ export async function autoAttachLibraryImage(
     /** Phase 20: 'library_only' | 'ai_only' | 'both'. Defaults to 'both'. */
     imageSource?: ImageSource;
     pillar?: ContentPillar | null;
+    /** 2026-05-24 #F1: today's date for seasonal grounding of the
+     *  image prompt. Defaults to new Date() if not passed so existing
+     *  callers don't break. Manual and cron paths both pass through. */
+    today?: Date;
+    /** 2026-05-24 #G2: AiConfig for industry + world_view grounding of
+     *  the image prompt. The body generator already gets this; without
+     *  it the image prompt fell back to abstract decorative scenes. */
+    aiConfig?: AiConfig | null;
   } = {},
 ): Promise<AutoAttachResult> {
   // ----- 0. Resolve the per-config image-source policy --------------------
@@ -180,6 +189,8 @@ export async function autoAttachLibraryImage(
       topicTags,
       pillar: options.pillar ?? null,
       recentDescriptions,
+      today: options.today ?? new Date(),
+      aiConfig: options.aiConfig ?? null,
     });
   }
 
@@ -198,6 +209,8 @@ export async function autoAttachLibraryImage(
     topicTags,
     pillar: options.pillar ?? null,
     recentDescriptions,
+    today: options.today ?? new Date(),
+    aiConfig: options.aiConfig ?? null,
   });
 }
 
@@ -217,6 +230,8 @@ async function aiOnlyPath(opts: {
   topicTags: string[];
   pillar: ContentPillar | null;
   recentDescriptions: string[];
+  today: Date;
+  aiConfig: AiConfig | null;
 }): Promise<AutoAttachResult> {
   const {
     client,
@@ -230,6 +245,8 @@ async function aiOnlyPath(opts: {
     topicTags,
     pillar,
     recentDescriptions,
+    today,
+    aiConfig,
   } = opts;
 
   // Build the pool first if it's still small AND quota remains.
@@ -245,6 +262,8 @@ async function aiOnlyPath(opts: {
       recentDescriptions,
       reason: "pool_buildup",
       currentPoolSize: aiCandidates.length,
+      today,
+      aiConfig,
     });
     if (generated) return generated;
     // Generate failed (quota / API key / Gemini error) — fall through
@@ -278,6 +297,8 @@ async function bothPath(opts: {
   topicTags: string[];
   pillar: ContentPillar | null;
   recentDescriptions: string[];
+  today: Date;
+  aiConfig: AiConfig | null;
 }): Promise<AutoAttachResult> {
   const {
     client,
@@ -293,6 +314,8 @@ async function bothPath(opts: {
     topicTags,
     pillar,
     recentDescriptions,
+    today,
+    aiConfig,
   } = opts;
 
   // If uploads exist, prefer them — they're real photos of the user's
@@ -321,6 +344,8 @@ async function bothPath(opts: {
       recentDescriptions,
       reason: "pool_buildup",
       currentPoolSize: aiCandidates.length,
+      today,
+      aiConfig,
     });
     if (generated) return generated;
   }
@@ -352,6 +377,8 @@ async function bothPath(opts: {
     recentDescriptions,
     reason: "cold_start",
     currentPoolSize: 0,
+    today,
+    aiConfig,
   });
   if (cold) return cold;
 
@@ -444,6 +471,8 @@ async function tryGeminiGenerate(opts: {
   recentDescriptions: string[];
   reason: "pool_buildup" | "cold_start";
   currentPoolSize: number;
+  today: Date;
+  aiConfig: AiConfig | null;
 }): Promise<AutoAttachResult | null> {
   const {
     client,
@@ -456,6 +485,8 @@ async function tryGeminiGenerate(opts: {
     recentDescriptions,
     reason,
     currentPoolSize,
+    today,
+    aiConfig,
   } = opts;
 
   const { data: profile } = await client
@@ -532,6 +563,8 @@ async function tryGeminiGenerate(opts: {
     {
       pillar,
       recentImageDescriptions: recentDescriptions,
+      today,
+      aiConfig,
     },
   );
   const shortDescription = buildAiImageDescription({

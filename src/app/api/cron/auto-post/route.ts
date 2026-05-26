@@ -298,6 +298,12 @@ async function processSchedule(
       imageSource: config.image_source ?? undefined,
       imageGenerationEnabled: config.image_generation_enabled,
       pillar: genCtx.pillar,
+      // 2026-05-24 #F1 / #G2: same arguments as the manual path so
+      // cron-generated images get the same season + business grounding.
+      // The body generator above already saw seasonalHint / staleEvents
+      // — without this the image silently desynced from the body.
+      today: new Date(),
+      aiConfig: config,
     },
   );
   console.log("[cron/auto-post] image attach result", {

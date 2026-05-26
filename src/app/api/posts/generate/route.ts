@@ -116,6 +116,12 @@ export async function POST(request: NextRequest) {
       imageSource: aiConfig.image_source ?? undefined,
       imageGenerationEnabled: aiConfig.image_generation_enabled,
       pillar: genCtx.pillar,
+      // 2026-05-24 #F1 / #G2: pass today + aiConfig so the image prompt
+      // gets seasonal grounding (matching the body's seasonalHint) and
+      // industry / world_view grounding (so the scene reflects the
+      // actual business, not a generic decorative lifestyle photo).
+      today: new Date(),
+      aiConfig,
     },
   );
   console.log("[POSTS-GENERATE] image attach result", {
