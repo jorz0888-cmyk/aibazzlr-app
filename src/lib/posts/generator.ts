@@ -222,13 +222,22 @@ ${aiConfig.world_view ?? ""}
 }
 
 /**
- * "5月24日" style JP date for prompt context. Always JST regardless
- * of the server timezone so the displayed date matches the date the
- * stale-event window math is based on.
+ * 2026-05-26 date-aware-post — JST 年月日 + 曜日 を返す。
+ *
+ * Only used when the caller passes publishAt (auto-publish path).
+ * Other paths (manual generate, approval, manual posting_mode) do NOT
+ * see this string — the publish time is unknown at generation time and
+ * embedding a date there would land in the post as a stale lie when
+ * the user posts it later. See調査 2026-05-26.
  */
-function formatJstDateForPrompt(now: Date = new Date()): string {
+function formatJstDateWithWeekday(now: Date): string {
   const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-  return `${jst.getUTCMonth() + 1}月${jst.getUTCDate()}日`;
+  const y = jst.getUTCFullYear();
+  const m = jst.getUTCMonth() + 1;
+  const d = jst.getUTCDate();
+  const w = jst.getUTCDay();
+  const label = ["日", "月", "火", "水", "木", "金", "土"][w];
+  return `${y}年${m}月${d}日（${label}曜日）`;
 }
 
 export function buildUserPrompt(
@@ -250,6 +259,17 @@ export function buildUserPrompt(
     staleEvents?: string[];
     /** Phase 17: 8–10 recent post bodies for "don't reuse these" cue. */
     recentBodies?: string[];
+    /**
+     * 2026-05-26 date-aware-post — when set, the caller asserts the
+     * post will be published at this wall-clock instant (cron + auto
+     * mode is the only path that knows this). The generator then adds
+     * an explicit 「今日は YYYY年MM月DD日（X曜日）です」 block so the
+     * LLM does not invent the weekday, and a 定休日 consistency rule
+     * so it does not announce business-as-usual on a closed day.
+     * Manual / approval / non-auto paths leave this undefined — they
+     * intentionally avoid date talk because the publish time is unknown.
+     */
+    publishAt?: Date;
   },
 ): string {
   let base = theme && theme.trim()
@@ -263,6 +283,21 @@ export function buildUserPrompt(
   const pillar = context?.pillar;
   if (pillar) {
     base += `\n\n【今回の柱】\n${pillar.name} — ${pillar.description}\nこの切り口で投稿を組み立ててください。`;
+  }
+
+  // 2026-05-26 date-aware-post — date / weekday / 定休日 整合.
+  // Only inserted when publishAt is provided (= cron + auto mode).
+  // For other paths the publish time is unknown at generation time so
+  // we deliberately do NOT show "today" — the LLM should write the
+  // post using only fixed facts (営業時間・定休日) without anchoring
+  // to a specific date that may not match when the user finally posts.
+  if (context?.publishAt) {
+    const jst = new Date(context.publishAt.getTime() + 9 * 60 * 60 * 1000);
+    const weekdayLabel = ["日", "月", "火", "水", "木", "金", "土"][
+      jst.getUTCDay()
+    ];
+    const dateLabel = formatJstDateWithWeekday(context.publishAt);
+    base += `\n\n【今日の日付・曜日】\n今日は${dateLabel}です。この投稿はこの日時に X に公開されます。本文で日付・曜日に触れる場合は、必ずこの値を使うこと。AI の推測で曜日を書かない。\n\n【定休日との整合】\n- 設定（システムプロンプト）に定休日が記載されている場合、今日の曜日（${weekdayLabel}曜日）と照らし合わせること\n- 今日が定休日に該当するなら「本日は定休日です」として扱い、営業中のように書かない（「今日も営業」「本日17時から」等の表現は禁止）\n- 今日が定休日に該当しないなら、通常通り営業中として書いてよい`;
   }
 
   // Phase 17: lightweight seasonal frame. Independent of pillar — model
@@ -280,7 +315,7 @@ export function buildUserPrompt(
     .map((s) => s.trim())
     .filter(Boolean);
   if (stale.length > 0) {
-    base += `\n\n【期間切れで使わない方が良い語（今日は ${formatJstDateForPrompt()}）】\n${stale.join(" / ")}\n※ これらは最近終わったイベント・季節キーワード。本文・テーマ・ハッシュタグの何処にも使わないこと（過去ネタとして振り返るのは可）。`;
+    base += `\n\n【期間切れで使わない方が良い語】\n${stale.join(" / ")}\n※ これらは最近終わったイベント・季節キーワード。本文・テーマ・ハッシュタグの何処にも使わないこと（過去ネタとして振り返るのは可）。`;
   }
 
   // Phase 17: recent bodies for "don't repeat yourself" cue. More
@@ -432,6 +467,13 @@ export async function generatePostDraft(
     staleEvents?: string[];
     /** Phase 17: ~10 recent post bodies for the "don't repeat" cue. */
     recentBodies?: string[];
+    /**
+     * 2026-05-26 date-aware-post — set ONLY when the caller knows the
+     * post will be published right now (cron + posting_mode === "auto").
+     * Manual generate / approval / manual posting_mode leave this
+     * undefined so the prompt does not anchor to a stale date.
+     */
+    publishAt?: Date;
   },
 ): Promise<GeneratedPost> {
   const anthropic = getAnthropic();
@@ -442,6 +484,7 @@ export async function generatePostDraft(
     seasonalHint: context?.seasonalHint,
     staleEvents: context?.staleEvents,
     recentBodies: context?.recentBodies,
+    publishAt: context?.publishAt,
   });
   const attempts: string[] = [];
   const warnings: string[] = [];

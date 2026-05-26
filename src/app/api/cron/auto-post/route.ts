@@ -247,6 +247,16 @@ async function processSchedule(
   const scheduledTimeJst = `${String(schedule.hour).padStart(2, "0")}:${String(schedule.minute).padStart(2, "0")}`;
   const genCtx = await buildGenerateContext(admin, config);
 
+  // 2026-05-26 date-aware-post — the auto-publish path generates and
+  // publishes the post within ~2 seconds of each other (see
+  // publishPostToX call below). In that one specific path the prompt
+  // can be given today's date+weekday+定休日整合 because generation
+  // time is publish time. approval / manual posting_mode wait for
+  // user action (could be hours/days later) — keep publishAt
+  // undefined for them so the prompt stays date-agnostic.
+  const publishAt =
+    config.posting_mode === "auto" ? new Date() : undefined;
+
   let generated;
   try {
     generated = await generatePostDraft(config, undefined, {
@@ -256,6 +266,7 @@ async function processSchedule(
       seasonalHint: genCtx.seasonalHint,
       staleEvents: genCtx.staleEvents,
       recentBodies: genCtx.recentBodies,
+      publishAt,
     });
   } catch (e) {
     console.error("[cron/auto-post] generation failed", {
