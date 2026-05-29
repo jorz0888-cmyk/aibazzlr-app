@@ -14,7 +14,6 @@ const items: {
   { href: "/dashboard/posts", label: "投稿履歴", icon: "✍️" },
   { href: "/dashboard/settings/ai", label: "AI設定", icon: "🧠" },
   { href: "/dashboard/billing", label: "プラン・課金", icon: "💳" },
-  { href: "/dashboard/analytics", label: "分析", icon: "📈", soon: true },
 ];
 
 export function DashboardSidebar() {
